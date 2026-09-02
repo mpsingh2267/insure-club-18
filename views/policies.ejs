@@ -1,0 +1,60 @@
+<%- include('partials/header') %>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Policies</h1>
+  <a class="btn btn-primary btn-sm" href="/policies/new">Add Policy</a>
+</div>
+
+<form method="get" class="row g-2 mb-3">
+  <div class="col-md-4"><input class="form-control" name="q" placeholder="Search policy/customer/insurer" value="<%= q %>" /></div>
+  <div class="col-md-3">
+    <select class="form-select" name="status">
+      <option value="">All statuses</option>
+      <% ['active','renewed','expired','cancelled'].forEach((s) => { %>
+        <option value="<%= s %>" <%= status === s ? 'selected' : '' %>><%= s %></option>
+      <% }) %>
+    </select>
+  </div>
+  <div class="col-md-3">
+    <select class="form-select" name="policy_type">
+      <option value="">All policy types</option>
+      <% ['life insurance','health insurance','motor insurance','other insurance'].forEach((t) => { %>
+        <option value="<%= t %>" <%= policy_type === t ? 'selected' : '' %>><%= t %></option>
+      <% }) %>
+    </select>
+  </div>
+  <div class="col-md-2"><button class="btn btn-outline-primary w-100">Filter</button></div>
+</form>
+
+<div class="table-responsive">
+<table class="table table-striped align-middle">
+  <thead><tr><th>Customer</th><th>Policy</th><th>Type</th><th>Insurer</th><th>Due</th><th>Status</th><th>Attachment</th><th>Actions</th></tr></thead>
+  <tbody>
+    <% policies.forEach((policy) => { %>
+      <tr>
+        <td><%= policy.full_name %></td>
+        <td><%= policy.policy_number %></td>
+        <td><%= policy.policy_type %></td>
+        <td><%= policy.insurer_name %></td>
+        <td><%= policy.renewal_due_date %></td>
+        <td><span class="badge text-bg-<%= policy.status === 'active' ? 'primary' : (policy.status === 'renewed' ? 'success' : 'secondary') %>"><%= policy.status %></span></td>
+        <td><% if (policy.attachment_path) { %><a href="<%= policy.attachment_path %>" target="_blank">View</a><% } else { %>-<% } %></td>
+        <td>
+          <div class="d-flex gap-1">
+            <a class="btn btn-sm btn-outline-primary" href="/policies/<%= policy.id %>/edit">Edit</a>
+            <% if (policy.status !== 'renewed') { %>
+              <form method="post" action="/policies/<%= policy.id %>/renew">
+                <button class="btn btn-sm btn-outline-success">Mark Renewed</button>
+              </form>
+            <% } %>
+            <form method="post" action="/policies/<%= policy.id %>/delete" onsubmit="return confirm('Delete this policy?')">
+              <button class="btn btn-sm btn-outline-danger">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+    <% }) %>
+    <% if (policies.length === 0) { %><tr><td colspan="8" class="text-center text-muted">No policies found.</td></tr><% } %>
+  </tbody>
+</table>
+</div>
+<%- include('partials/footer') %>

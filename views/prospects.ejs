@@ -1,0 +1,65 @@
+<%- include('partials/header') %>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Prospects Pipeline</h1>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="/prospects/export.csv">Export CSV</a>
+    <a class="btn btn-primary btn-sm" href="/prospects/new">Add Prospect</a>
+  </div>
+</div>
+
+<div class="card p-3 mb-3">
+  <h2 class="h6">Import Prospects CSV</h2>
+  <form method="post" action="/prospects/import" enctype="multipart/form-data" class="d-flex gap-2">
+    <input type="file" class="form-control" name="csv_file" accept=".csv" required />
+    <button class="btn btn-outline-primary">Import</button>
+  </form>
+  <small class="text-muted mt-2">Columns: full_name, phone, email, status, pipeline_stage, attempts, follow_up_date, notes</small>
+</div>
+
+<form method="get" class="row g-2 mb-3">
+  <div class="col-md-8"><input class="form-control" name="q" placeholder="Search name, phone, email" value="<%= q %>" /></div>
+  <div class="col-md-2">
+    <select class="form-select" name="status">
+      <option value="">All statuses</option>
+      <% ['calling updates','appointment status','meeting status','final meeting status','call closed','call denied'].forEach((s) => { %>
+        <option value="<%= s %>" <%= status === s ? 'selected' : '' %>><%= s %></option>
+      <% }) %>
+    </select>
+  </div>
+  <div class="col-md-2"><button class="btn btn-outline-primary w-100">Filter</button></div>
+</form>
+
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead><tr><th>Name</th><th>Status</th><th>Pipeline Stage</th><th>Attempts</th><th>Follow-up</th><th>Notes</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% prospects.forEach((prospect) => { %>
+        <tr>
+          <td>
+            <strong><%= prospect.full_name %></strong><br />
+            <small><%= prospect.phone || '-' %> • <%= prospect.email || '-' %></small>
+          </td>
+          <td><%= prospect.status %></td>
+          <td><%= prospect.pipeline_stage %></td>
+          <td><%= prospect.attempts %></td>
+          <td><%= prospect.follow_up_date || '-' %></td>
+          <td><%= prospect.notes || '-' %></td>
+          <td>
+            <div class="d-flex gap-1 mb-1">
+              <a class="btn btn-sm btn-outline-primary" href="/prospects/<%= prospect.id %>/edit">Edit</a>
+              <form method="post" action="/prospects/<%= prospect.id %>/delete" onsubmit="return confirm('Delete this prospect?')">
+                <button class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+            </div>
+            <form method="post" action="/prospects/<%= prospect.id %>/send-service-message" class="d-flex gap-1">
+              <input class="form-control form-control-sm" name="message_body" placeholder="Personalized service message" />
+              <button class="btn btn-sm btn-outline-success">Send</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+      <% if (prospects.length === 0) { %><tr><td colspan="7" class="text-center text-muted">No prospects found.</td></tr><% } %>
+    </tbody>
+  </table>
+</div>
+<%- include('partials/footer') %>

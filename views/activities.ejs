@@ -1,0 +1,50 @@
+<%- include('partials/header') %>
+<h1 class="h3 mb-3">Audit / History</h1>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">Status & Change Logs</div>
+      <div class="list-group list-group-flush small-scroll">
+        <% auditLogs.forEach((item) => { %>
+          <div class="list-group-item">
+            <div><strong><%= item.entity_type %></strong> #<%= item.entity_id || '-' %></div>
+            <div><%= item.action %></div>
+            <small class="text-muted"><%= item.created_at %></small>
+          </div>
+        <% }) %>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">Renewal Reminder Logs</div>
+      <div class="list-group list-group-flush small-scroll">
+        <% reminderLogs.forEach((item) => { %>
+          <div class="list-group-item">
+            <div><strong><%= item.policy_number %></strong> - <%= item.reminder_type %></div>
+            <div><%= item.channel %> • <%= item.status %></div>
+            <small class="text-muted">Scheduled: <%= item.scheduled_for %></small>
+          </div>
+        <% }) %>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">Message Dispatch Logs</div>
+      <div class="list-group list-group-flush small-scroll">
+        <% messageLogs.forEach((item) => { %>
+          <div class="list-group-item">
+            <div><strong><%= item.recipient_name || '-' %></strong> (<%= item.recipient_type %>)</div>
+            <div><%= item.channel %> • <%= item.template_key || 'custom' %> • <%= item.status %></div>
+            <small class="text-muted"><%= item.sent_at %></small>
+          </div>
+        <% }) %>
+      </div>
+    </div>
+  </div>
+</div>
+<%- include('partials/footer') %>

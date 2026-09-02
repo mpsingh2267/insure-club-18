@@ -1,0 +1,25 @@
+<%- include('partials/header') %>
+<h1 class="h3 mb-3"><%= prospect ? 'Edit Prospect' : 'Add Prospect' %></h1>
+<form method="post" action="<%= action %>" class="card p-3">
+  <div class="row g-3">
+    <div class="col-md-4"><label class="form-label">Full name</label><input class="form-control" name="full_name" value="<%= prospect?.full_name || '' %>" required /></div>
+    <div class="col-md-4"><label class="form-label">Phone</label><input class="form-control" name="phone" value="<%= prospect?.phone || '' %>" /></div>
+    <div class="col-md-4"><label class="form-label">Email</label><input type="email" class="form-control" name="email" value="<%= prospect?.email || '' %>" /></div>
+    <div class="col-md-4"><label class="form-label">Status</label>
+      <select class="form-select" name="status">
+        <% ['calling updates','appointment status','meeting status','final meeting status','call closed','call denied'].forEach((s) => { %>
+          <option value="<%= s %>" <%= (prospect?.status || 'calling updates') === s ? 'selected' : '' %>><%= s %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="col-md-4"><label class="form-label">Pipeline Stage</label><input class="form-control" name="pipeline_stage" value="<%= prospect?.pipeline_stage || 'new' %>" /></div>
+    <div class="col-md-4"><label class="form-label">Attempts</label><input type="number" class="form-control" name="attempts" value="<%= prospect?.attempts || 0 %>" /></div>
+    <div class="col-md-4"><label class="form-label">Follow-up Date</label><input type="date" class="form-control" name="follow_up_date" value="<%= prospect?.follow_up_date || '' %>" /></div>
+    <div class="col-12"><label class="form-label">Notes</label><textarea class="form-control" rows="3" name="notes"><%= prospect?.notes || '' %></textarea></div>
+  </div>
+  <div class="mt-3 d-flex gap-2">
+    <button class="btn btn-primary">Save</button>
+    <a class="btn btn-outline-secondary" href="/prospects">Back</a>
+  </div>
+</form>
+<%- include('partials/footer') %>

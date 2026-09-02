@@ -1,0 +1,39 @@
+<%- include('partials/header') %>
+<h1 class="h3 mb-3"><%= meeting ? 'Edit Meeting' : 'Schedule Meeting' %></h1>
+<form method="post" action="<%= action %>" class="card p-3">
+  <div class="row g-3">
+    <div class="col-md-6"><label class="form-label">Title</label><input class="form-control" name="title" value="<%= meeting?.title || '' %>" required /></div>
+    <div class="col-md-3"><label class="form-label">Date</label><input type="date" class="form-control" name="meeting_date" value="<%= meeting?.meeting_date || today %>" required /></div>
+    <div class="col-md-3"><label class="form-label">Time</label><input type="time" class="form-control" name="meeting_time" value="<%= meeting?.meeting_time || '' %>" /></div>
+    <div class="col-md-6"><label class="form-label">Link Customer</label>
+      <select class="form-select" name="customer_id">
+        <option value="">No customer</option>
+        <% customers.forEach((customer) => { %>
+          <option value="<%= customer.id %>" <%= Number(meeting?.customer_id) === customer.id ? 'selected' : '' %>><%= customer.full_name %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="col-md-6"><label class="form-label">Link Prospect</label>
+      <select class="form-select" name="prospect_id">
+        <option value="">No prospect</option>
+        <% prospects.forEach((prospect) => { %>
+          <option value="<%= prospect.id %>" <%= Number(meeting?.prospect_id) === prospect.id ? 'selected' : '' %>><%= prospect.full_name %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="col-md-4"><label class="form-label">Meeting Status</label>
+      <select class="form-select" name="meeting_status">
+        <% ['scheduled','appointment status','meeting status','final meeting status','completed','cancelled'].forEach((status) => { %>
+          <option value="<%= status %>" <%= (meeting?.meeting_status || 'scheduled') === status ? 'selected' : '' %>><%= status %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="col-md-8"><label class="form-label">Location</label><input class="form-control" name="location" value="<%= meeting?.location || '' %>" /></div>
+    <div class="col-12"><label class="form-label">Notes</label><textarea class="form-control" name="notes" rows="3"><%= meeting?.notes || '' %></textarea></div>
+  </div>
+  <div class="mt-3 d-flex gap-2">
+    <button class="btn btn-primary">Save</button>
+    <a class="btn btn-outline-secondary" href="/meetings">Back</a>
+  </div>
+</form>
+<%- include('partials/footer') %>

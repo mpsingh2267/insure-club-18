@@ -1,0 +1,50 @@
+<%- include('partials/header') %>
+<h1 class="h3 mb-3">Messaging Templates & Broadcast</h1>
+
+<div class="card p-3 mb-4">
+  <h2 class="h6">Save/Update Template</h2>
+  <form method="post" action="/templates" class="row g-2">
+    <div class="col-md-3"><input class="form-control" name="template_key" placeholder="template key" required /></div>
+    <div class="col-md-2">
+      <select class="form-select" name="channel">
+        <option value="sms">sms</option>
+        <option value="whatsapp">whatsapp</option>
+      </select>
+    </div>
+    <div class="col-md-5"><input class="form-control" name="body" placeholder="Template body with {{name}}" required /></div>
+    <div class="col-md-2"><button class="btn btn-outline-primary w-100">Save Template</button></div>
+  </form>
+</div>
+
+<div class="card p-3 mb-4">
+  <h2 class="h6">Festival Broadcast</h2>
+  <form method="post" action="/messages/festival" class="row g-2 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label">Audience</label>
+      <select class="form-select" name="audience">
+        <option value="all">All Customers & Prospects</option>
+        <option value="customers">Customers only</option>
+        <option value="prospects">Prospects only</option>
+      </select>
+    </div>
+    <div class="col-md-3"><button class="btn btn-success">Send Festival Messages</button></div>
+  </form>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped">
+    <thead><tr><th>Template Key</th><th>Channel</th><th>Body</th><th>Created</th></tr></thead>
+    <tbody>
+      <% templates.forEach((template) => { %>
+        <tr>
+          <td><%= template.template_key %></td>
+          <td><%= template.channel %></td>
+          <td><%= template.body %></td>
+          <td><%= template.created_at %></td>
+        </tr>
+      <% }) %>
+      <% if (templates.length === 0) { %><tr><td colspan="4" class="text-center text-muted">No templates yet.</td></tr><% } %>
+    </tbody>
+  </table>
+</div>
+<%- include('partials/footer') %>
