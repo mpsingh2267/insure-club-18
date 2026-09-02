@@ -1,8 +1,10 @@
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 const dayjs = require('dayjs');
 
 const { initDb, all, get, run } = require('./db');
@@ -15,7 +17,11 @@ const app = express();
 const uploadDir = path.join(__dirname, '..', 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
 
-const upload = multer({ dest: uploadDir });
+const policyUpload = multer({ dest: uploadDir });
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+});
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '..', 'views'));
@@ -24,6 +30,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use('/public', express.static(path.join(__dirname, '..', 'public')));
 app.use('/uploads', express.static(uploadDir));
+app.set('trust proxy', 1);
 
 app.use(
   session({
@@ -32,17 +39,55 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
+      sameSite: 'strict',
+      secure: process.env.NODE_ENV === 'production',
     },
   })
 );
+
+function makeCsrfToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+function matchesToken(expectedToken, receivedToken) {
+  if (!expectedToken || !receivedToken) {
+    return false;
+  }
+  const expected = Buffer.from(expectedToken);
+  const received = Buffer.from(receivedToken);
+  if (expected.length !== received.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(expected, received);
+}
+
+app.use((req, _res, next) => {
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = makeCsrfToken();
+  }
+  next();
+});
+
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    next();
+    return;
+  }
+
+  const providedToken = req.query._csrf || req.body?._csrf || req.headers['x-csrf-token'];
+  if (!matchesToken(req.session.csrfToken, providedToken)) {
+    res.status(403).send('Invalid CSRF token');
+    return;
+  }
+  next();
+});
 
 app.use((req, res, next) => {
   res.locals.currentPath = req.path;
   res.locals.loggedIn = Boolean(req.session && req.session.userId);
   res.locals.userName = req.session?.userName || null;
   res.locals.today = dayjs().format('YYYY-MM-DD');
+  res.locals.csrfToken = req.session.csrfToken;
   next();
 });
 
@@ -100,7 +145,21 @@ app.get('/login', (req, res) => {
   res.render('login', { error: null });
 });
 
-app.post('/login', async (req, res) => {
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 25,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const importRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.post('/login', loginRateLimiter, async (req, res) => {
   const { username, password } = req.body;
   const user = await get('SELECT * FROM users WHERE username = ?', [username]);
 
@@ -340,7 +399,7 @@ app.get('/policies/new', requireAuth, async (req, res) => {
   });
 });
 
-app.post('/policies', requireAuth, upload.single('attachment'), async (req, res) => {
+app.post('/policies', requireAuth, policyUpload.single('attachment'), async (req, res) => {
   const {
     customer_id,
     policy_type,
@@ -400,7 +459,7 @@ app.get('/policies/:id/edit', requireAuth, async (req, res) => {
   });
 });
 
-app.post('/policies/:id', requireAuth, upload.single('attachment'), async (req, res) => {
+app.post('/policies/:id', requireAuth, policyUpload.single('attachment'), async (req, res) => {
   const existing = await get('SELECT * FROM policies WHERE id = ?', [req.params.id]);
   if (!existing) {
     res.status(404).send('Policy not found');
@@ -626,13 +685,13 @@ app.post('/prospects/:id/send-service-message', requireAuth, async (req, res) =>
   res.redirect('/prospects');
 });
 
-app.post('/prospects/import', requireAuth, upload.single('csv_file'), async (req, res) => {
+app.post('/prospects/import', requireAuth, importRateLimiter, csvUpload.single('csv_file'), async (req, res) => {
   if (!req.file) {
     res.status(400).send('CSV file is required');
     return;
   }
 
-  const content = fs.readFileSync(req.file.path, 'utf8');
+  const content = req.file.buffer.toString('utf8');
   const records = parseCsv(content);
   let imported = 0;
 

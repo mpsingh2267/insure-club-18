@@ -7,7 +7,7 @@ function hashPassword(password) {
 }
 
 function verifyPassword(password, encoded) {
-  if (!encoded || !encoded.includes(':')) {
+  if (typeof password !== 'string' || !encoded || !encoded.includes(':')) {
     return false;
   }
   const [salt, hash] = encoded.split(':');
