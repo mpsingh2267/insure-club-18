@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Insure Club 18</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.17/main.min.css" rel="stylesheet" />
+  <link href="/public/styles.css" rel="stylesheet" />
+</head>
+<body>
+  <% if (loggedIn) { %>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="/">Insure Club 18</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navMenu">
+          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+            <li class="nav-item"><a class="nav-link <%= currentPath === '/' ? 'active' : '' %>" href="/">Dashboard</a></li>
+            <li class="nav-item"><a class="nav-link <%= currentPath.startsWith('/customers') ? 'active' : '' %>" href="/customers">Customers</a></li>
+            <li class="nav-item"><a class="nav-link <%= currentPath.startsWith('/policies') ? 'active' : '' %>" href="/policies">Policies</a></li>
+            <li class="nav-item"><a class="nav-link <%= currentPath.startsWith('/prospects') ? 'active' : '' %>" href="/prospects">Prospects</a></li>
+            <li class="nav-item"><a class="nav-link <%= currentPath.startsWith('/meetings') ? 'active' : '' %>" href="/meetings">Meetings</a></li>
+            <li class="nav-item"><a class="nav-link <%= currentPath.startsWith('/calendar') ? 'active' : '' %>" href="/calendar">Calendar</a></li>
+            <li class="nav-item"><a class="nav-link <%= currentPath.startsWith('/templates') ? 'active' : '' %>" href="/templates">Messaging</a></li>
+            <li class="nav-item"><a class="nav-link <%= currentPath.startsWith('/activities') ? 'active' : '' %>" href="/activities">History</a></li>
+          </ul>
+          <span class="text-light me-3">Logged in as <%= userName %></span>
+          <form method="post" action="/logout">
+            <button class="btn btn-light btn-sm" type="submit">Logout</button>
+          </form>
+        </div>
+      </div>
+    </nav>
+  <% } %>
+  <main class="container pb-5">

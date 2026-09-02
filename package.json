@@ -1,0 +1,30 @@
+{
+  "name": "insure-club-18",
+  "version": "1.0.0",
+  "description": "Insure Club 18 CRM for insurance customers, policies, reminders, prospects, and messaging automation",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://localhost:26831/mpsingh2267/insure-club-18"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "csv-parse": "^7.0.2",
+    "csv-stringify": "^6.8.3",
+    "dayjs": "^1.11.23",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "multer": "^2.3.0",
+    "node-cron": "^4.6.0",
+    "sqlite3": "^6.0.1"
+  }
+}

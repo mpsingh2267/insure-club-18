@@ -1,0 +1,91 @@
+<%- include('partials/header') %>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Dashboard</h1>
+  <form method="post" action="/automation/run-now">
+    <button class="btn btn-outline-primary btn-sm" type="submit">Run Automation Now</button>
+  </form>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4"><div class="card p-3 stat-card"><div class="text-muted">Upcoming Renewals</div><div class="display-6"><%= upcomingRenewals.length %></div></div></div>
+  <div class="col-md-4"><div class="card p-3 stat-card"><div class="text-muted">Birthdays</div><div class="display-6"><%= birthdays.length %></div></div></div>
+  <div class="col-md-4"><div class="card p-3 stat-card"><div class="text-muted">Anniversaries</div><div class="display-6"><%= anniversaries.length %></div></div></div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header">Upcoming Renewals</div>
+      <ul class="list-group list-group-flush">
+        <% upcomingRenewals.forEach((item) => { %>
+          <li class="list-group-item d-flex justify-content-between">
+            <span><strong><%= item.full_name %></strong> - <%= item.policy_number %> (<%= item.policy_type %>)</span>
+            <span><%= item.renewal_due_date %></span>
+          </li>
+        <% }) %>
+        <% if (upcomingRenewals.length === 0) { %><li class="list-group-item text-muted">No upcoming renewals.</li><% } %>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header">Upcoming Meetings</div>
+      <ul class="list-group list-group-flush">
+        <% meetings.forEach((item) => { %>
+          <li class="list-group-item d-flex justify-content-between">
+            <span><strong><%= item.title %></strong> - <%= item.customer_name || item.prospect_name || 'Unlinked' %></span>
+            <span><%= item.meeting_date %> <%= item.meeting_time || '' %></span>
+          </li>
+        <% }) %>
+        <% if (meetings.length === 0) { %><li class="list-group-item text-muted">No meetings planned.</li><% } %>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header">Prospect Follow-ups</div>
+      <ul class="list-group list-group-flush">
+        <% followUps.forEach((item) => { %>
+          <li class="list-group-item d-flex justify-content-between">
+            <span><strong><%= item.full_name %></strong> - <%= item.status %></span>
+            <span><%= item.follow_up_date || '-' %></span>
+          </li>
+        <% }) %>
+        <% if (followUps.length === 0) { %><li class="list-group-item text-muted">No follow-ups.</li><% } %>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header">Recent Messages</div>
+      <ul class="list-group list-group-flush">
+        <% messageLogs.forEach((item) => { %>
+          <li class="list-group-item">
+            <div><strong><%= item.recipient_name || 'Unknown' %></strong> via <%= item.channel %></div>
+            <small class="text-muted"><%= item.template_key || 'custom' %> • <%= item.sent_at %></small>
+          </li>
+        <% }) %>
+        <% if (messageLogs.length === 0) { %><li class="list-group-item text-muted">No message activity yet.</li><% } %>
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">Recent Audit Activity</div>
+      <ul class="list-group list-group-flush">
+        <% activityLogs.forEach((item) => { %>
+          <li class="list-group-item d-flex justify-content-between">
+            <span><strong><%= item.entity_type %></strong> - <%= item.action %></span>
+            <span class="text-muted"><%= item.created_at %></span>
+          </li>
+        <% }) %>
+        <% if (activityLogs.length === 0) { %><li class="list-group-item text-muted">No audit events yet.</li><% } %>
+      </ul>
+    </div>
+  </div>
+</div>
+<%- include('partials/footer') %>

@@ -1,0 +1,22 @@
+body {
+  background: #f6f8fb;
+}
+
+.card {
+  border: 1px solid #e6ebf2;
+}
+
+.stat-card {
+  min-height: 120px;
+}
+
+.small-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+#meetingCalendar {
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px;
+}

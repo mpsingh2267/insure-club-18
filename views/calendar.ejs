@@ -1,0 +1,43 @@
+<%- include('partials/header') %>
+<h1 class="h3 mb-3">Meeting Calendar</h1>
+<div class="card p-3 mb-4">
+  <div id="meetingCalendar"></div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">Upcoming Events</div>
+      <ul class="list-group list-group-flush">
+        <% upcoming.forEach((item) => { %>
+          <li class="list-group-item"><strong><%= item.title %></strong> - <%= item.meeting_date %> <%= item.meeting_time || '' %></li>
+        <% }) %>
+        <% if (upcoming.length === 0) { %><li class="list-group-item text-muted">No upcoming events.</li><% } %>
+      </ul>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">Past Events</div>
+      <ul class="list-group list-group-flush">
+        <% past.forEach((item) => { %>
+          <li class="list-group-item"><strong><%= item.title %></strong> - <%= item.meeting_date %> <%= item.meeting_time || '' %></li>
+        <% }) %>
+        <% if (past.length === 0) { %><li class="list-group-item text-muted">No past events.</li><% } %>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const calendarEl = document.getElementById('meetingCalendar');
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+      initialView: 'dayGridMonth',
+      height: 'auto',
+      events: '/api/calendar-events'
+    });
+    calendar.render();
+  });
+</script>
+<%- include('partials/footer') %>
