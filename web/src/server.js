@@ -12,6 +12,7 @@ const { hashPassword, verifyPassword, requireAuth } = require('./auth');
 const { parseCsv, toCsv } = require('./csv');
 const { dispatchMessage } = require('./messaging');
 const { runDailyAutomation, startScheduler } = require('./automation');
+const supabase = require('./supabase');
 
 const app = express();
 const uploadDir = path.join(__dirname, '..', 'uploads');
@@ -545,9 +546,96 @@ app.post('/policies/:id/renew', requireAuth, async (req, res) => {
     return;
   }
 
+  // Preserve the older policy: mark status as 'renewed'. Older policy is NEVER deleted!
   await run('UPDATE policies SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['renewed', req.params.id]);
   await addAudit('policy', Number(req.params.id), 'policy_status_changed', { from: policy.status, to: 'renewed' });
+
+  // Optional: automatically create the new active policy for the next renewal cycle if requested
+  if (req.body.create_next_term === '1' || req.query.create_next === '1') {
+    const nextDue = dayjs(policy.renewal_due_date).add(1, 'year').format('YYYY-MM-DD');
+    const newStartDate = policy.renewal_due_date;
+    const newNumber = req.body.new_policy_number || policy.policy_number;
+    const newPremium = req.body.new_premium ? toNumber(req.body.new_premium) : policy.premium_amount;
+    const result = await run(
+      `INSERT INTO policies (customer_id, policy_type, policy_number, insurer_name, start_date, renewal_due_date, premium_amount, status, previous_policy_id, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, CURRENT_TIMESTAMP)`,
+      [policy.customer_id, policy.policy_type, newNumber, policy.insurer_name, newStartDate, nextDue, newPremium, policy.id]
+    );
+    await addAudit('policy', result.lastID, 'policy_created_from_renewal', { previous_policy_id: policy.id });
+  }
+
   res.redirect('/policies');
+});
+
+// Generic Local Document Attachments (PAN cards, Birth certificates, Aadhaar, etc.)
+app.post('/customers/:id/documents', requireAuth, policyUpload.single('document_file'), async (req, res) => {
+  const customer = await get('SELECT id, full_name FROM customers WHERE id = ?', [req.params.id]);
+  if (!customer) {
+    res.status(404).send('Customer not found');
+    return;
+  }
+  const { document_type, title, policy_id, family_member_id } = req.body;
+  if (!req.file) {
+    res.status(400).send('Please choose a file to attach (PDF, image, etc.)');
+    return;
+  }
+  const filePath = `/uploads/${req.file.filename}`;
+  await run(
+    `INSERT INTO documents (customer_id, policy_id, family_member_id, document_type, title, file_path, original_filename, file_size, mime_type, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    [
+      customer.id,
+      policy_id ? Number(policy_id) : null,
+      family_member_id ? Number(family_member_id) : null,
+      document_type || 'General Document',
+      title || req.file.originalname,
+      filePath,
+      req.file.originalname,
+      req.file.size,
+      req.file.mimetype
+    ]
+  );
+  await addAudit('customer', customer.id, 'document_attached', { document_type, title, filePath });
+  res.redirect(`/customers/${customer.id}`);
+});
+
+app.post('/documents/:id/delete', requireAuth, async (req, res) => {
+  const doc = await get('SELECT * FROM documents WHERE id = ?', [req.params.id]);
+  if (doc) {
+    try {
+      const diskPath = path.join(__dirname, '..', doc.file_path);
+      if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);
+    } catch (ignored) {}
+    await run('DELETE FROM documents WHERE id = ?', [doc.id]);
+    await addAudit('document', doc.id, 'document_deleted', { title: doc.title });
+    res.redirect(`/customers/${doc.customer_id}`);
+    return;
+  }
+  res.redirect('/customers');
+});
+
+// Supabase Cloud Sync Endpoints
+app.get('/api/supabase/status', requireAuth, async (_req, res) => {
+  const result = await supabase.testConnection();
+  res.json({ configured: supabase.isConfigured(), ...result });
+});
+
+app.post('/api/supabase/sync-up', requireAuth, async (_req, res) => {
+  try {
+    const result = await supabase.syncToSupabase({ all, get, run });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/supabase/sync-down', requireAuth, async (_req, res) => {
+  try {
+    const result = await supabase.syncFromSupabase({ all, get, run });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get('/prospects', requireAuth, async (req, res) => {

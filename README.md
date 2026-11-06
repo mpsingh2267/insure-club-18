@@ -24,12 +24,17 @@ InsureClub is an end-to-end insurance CRM and entry management suite built for i
 ├── docs/                 # Verification reports, upgrade guides, and checksums
 │   ├── InsureClub-Premium-v2.0-README.md
 │   ├── InsureClub-Premium-v2.0-TEST-REPORT.md
+│   ├── InsureClub-Premium-v2.2-README.md
 │   └── SHA256SUMS.txt
 │
-├── releases/             # Pre-built signed APKs (v1.0, v2.0, v2.1)
+├── releases/             # Pre-built signed APKs (v1.0, v2.0, v2.1, v2.2)
 │   ├── InsureClub-Premium-v1.0.apk
 │   ├── InsureClub-Premium-v2.0.apk
-│   └── InsureClub-Premium-v2.1.apk
+│   ├── InsureClub-Premium-v2.1.apk
+│   └── InsureClub-Premium-v2.2.apk
+│
+├── supabase/             # Supabase cloud database schema & migrations
+│   └── schema.sql        # Database tables, indexes, and RLS policies
 │
 └── assets/               # Branding assets, UI screenshots, and diagrams
 ```

@@ -26,3 +26,5 @@ captures/
 
 # Allow tracked binary releases
 !releases/*.apk
+*.idsig
+

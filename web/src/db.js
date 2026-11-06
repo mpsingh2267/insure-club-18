@@ -192,6 +192,29 @@ async function initDb(hashPassword) {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL,
+      policy_id INTEGER,
+      family_member_id INTEGER,
+      document_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      original_filename TEXT NOT NULL,
+      file_size INTEGER DEFAULT 0,
+      mime_type TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+      FOREIGN KEY(policy_id) REFERENCES policies(id) ON DELETE SET NULL,
+      FOREIGN KEY(family_member_id) REFERENCES family_members(id) ON DELETE SET NULL
+    )
+  `);
+
+  try {
+    await run('ALTER TABLE policies ADD COLUMN previous_policy_id INTEGER REFERENCES policies(id)');
+  } catch (ignored) {}
+
   const user = await get('SELECT id FROM users WHERE username = ?', ['admin']);
   if (!user) {
     await run('INSERT INTO users (username, password_hash) VALUES (?, ?)', ['admin', hashPassword('admin123')]);
