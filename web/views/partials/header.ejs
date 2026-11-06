@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#111827" />
+  <title>Insure Club 18</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.17/main.min.css" rel="stylesheet" />
+  <link href="/public/styles.css" rel="stylesheet" />
+</head>
+<body class="<%= loggedIn ? 'app-body' : 'auth-body' %>">
+  <% if (loggedIn) { %>
+    <div class="app-shell">
+      <aside class="app-sidebar" id="appSidebar">
+        <div class="brand-lockup">
+          <div class="brand-mark">IC</div>
+          <div><div class="brand-name">Insure Club 18</div><div class="brand-caption">Advisor workspace</div></div>
+        </div>
+        <nav class="sidebar-nav" aria-label="Primary navigation">
+          <div class="nav-section-label">Workspace</div>
+          <a class="sidebar-link <%= currentPath === '/' ? 'active' : '' %>" href="/"><span class="nav-symbol">01</span><span>Overview</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/customers') ? 'active' : '' %>" href="/customers"><span class="nav-symbol">02</span><span>Customers</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/policies') ? 'active' : '' %>" href="/policies"><span class="nav-symbol">03</span><span>Policies</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/prospects') ? 'active' : '' %>" href="/prospects"><span class="nav-symbol">04</span><span>Prospect pipeline</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/meetings') ? 'active' : '' %>" href="/meetings"><span class="nav-symbol">05</span><span>Meetings</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/calendar') ? 'active' : '' %>" href="/calendar"><span class="nav-symbol">06</span><span>Calendar</span></a>
+          <div class="nav-section-label mt-4">Operations</div>
+          <a class="sidebar-link <%= currentPath.startsWith('/templates') ? 'active' : '' %>" href="/templates"><span class="nav-symbol">07</span><span>Messaging</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/activities') ? 'active' : '' %>" href="/activities"><span class="nav-symbol">08</span><span>Activity history</span></a>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="workspace-status"><span class="status-pulse"></span><span>Automation online</span></div>
+          <div class="user-panel">
+            <div class="user-avatar"><%= (userName || 'A').slice(0, 1).toUpperCase() %></div>
+            <div class="user-copy"><strong><%= userName %></strong><span>Administrator</span></div>
+            <form method="post" action="/logout"><button class="logout-button" type="submit" aria-label="Log out">↗</button></form>
+          </div>
+        </div>
+      </aside>
+      <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="Close navigation"></button>
+      <main class="app-main">
+        <header class="app-topbar">
+          <button class="menu-button" id="menuButton" type="button" aria-label="Open navigation"><span></span><span></span><span></span></button>
+          <div><div class="topbar-kicker">Insurance command centre</div><div class="topbar-title">Good to see you, <%= userName %></div></div>
+          <div class="topbar-meta"><span class="live-badge"><span></span> Live workspace</span><span class="date-badge"><%= today %></span></div>
+        </header>
+        <section class="app-content">
+  <% } else { %>
+    <main class="auth-shell">
+  <% } %>

@@ -1,0 +1,68 @@
+<%- include('partials/header') %>
+<div class="page-header">
+  <div>
+    <div class="page-eyebrow">Portfolio intelligence</div>
+    <h1 class="page-title">Executive overview</h1>
+    <p class="page-subtitle">A live view of your customer portfolio, policy book, follow-ups, and service operations.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-outline-secondary" href="/prospects/new">Add prospect</a>
+    <a class="btn btn-primary" href="/customers/new">Add customer</a>
+    <form method="post" action="/automation/run-now"><button class="btn btn-outline-primary" type="submit">Run automation</button></form>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-xl-3"><div class="card stat-card"><div class="stat-icon">C</div><div class="stat-label">Total customers</div><div class="stat-value"><%= portfolio.customer_count %></div><div class="stat-note">Relationships under management</div></div></div>
+  <div class="col-sm-6 col-xl-3"><div class="card stat-card mint"><div class="stat-icon">P</div><div class="stat-label">Active policies</div><div class="stat-value"><%= portfolio.active_policy_count %></div><div class="stat-note">Currently in force</div></div></div>
+  <div class="col-sm-6 col-xl-3"><div class="card stat-card amber"><div class="stat-icon">₹</div><div class="stat-label">Managed premium</div><div class="stat-value">₹<%= Number(portfolio.managed_premium || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 }) %></div><div class="stat-note">Active and renewed book</div></div></div>
+  <div class="col-sm-6 col-xl-3"><div class="card stat-card blue"><div class="stat-icon">L</div><div class="stat-label">Open opportunities</div><div class="stat-value"><%= portfolio.open_prospect_count %></div><div class="stat-note">Prospects requiring attention</div></div></div>
+</div>
+
+<div class="row g-4">
+  <div class="col-xl-7">
+    <div class="card section-card">
+      <div class="card-header section-heading"><span>Priority renewals</span><a href="/policies">View policy book →</a></div>
+      <ul class="list-group list-group-flush">
+        <% upcomingRenewals.forEach((item) => { %>
+          <li class="list-group-item"><div class="data-row"><div class="row-avatar"><%= item.full_name.slice(0, 2).toUpperCase() %></div><div class="row-copy"><div class="row-title"><%= item.full_name %></div><div class="row-meta"><%= item.policy_number %> · <%= item.policy_type %> · <%= item.insurer_name %></div></div><div class="row-date">Due <%= item.renewal_due_date %></div></div></li>
+        <% }) %>
+        <% if (upcomingRenewals.length === 0) { %><li class="list-group-item empty-state">No renewals need attention.</li><% } %>
+      </ul>
+    </div>
+  </div>
+  <div class="col-xl-5">
+    <div class="card section-card">
+      <div class="card-header section-heading"><span>Upcoming meetings</span><a href="/calendar">Open calendar →</a></div>
+      <ul class="list-group list-group-flush">
+        <% meetings.forEach((item) => { %>
+          <li class="list-group-item"><div class="data-row"><div class="row-avatar">M</div><div class="row-copy"><div class="row-title"><%= item.title %></div><div class="row-meta"><%= item.customer_name || item.prospect_name || 'Unlinked meeting' %></div></div><div class="row-date"><%= item.meeting_date %><br /><%= item.meeting_time || 'All day' %></div></div></li>
+        <% }) %>
+        <% if (meetings.length === 0) { %><li class="list-group-item empty-state">Your meeting calendar is clear.</li><% } %>
+      </ul>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card section-card">
+      <div class="card-header section-heading"><span>Prospect follow-ups</span><a href="/prospects">Open pipeline →</a></div>
+      <ul class="list-group list-group-flush">
+        <% followUps.forEach((item) => { %>
+          <li class="list-group-item"><div class="data-row"><div class="row-avatar"><%= item.full_name.slice(0, 2).toUpperCase() %></div><div class="row-copy"><div class="row-title"><%= item.full_name %></div><div class="row-meta"><%= item.status %> · <%= item.attempts %> attempt<%= item.attempts === 1 ? '' : 's' %></div></div><div class="row-date"><%= item.follow_up_date || 'Unscheduled' %></div></div></li>
+        <% }) %>
+        <% if (followUps.length === 0) { %><li class="list-group-item empty-state">No follow-ups scheduled.</li><% } %>
+      </ul>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card section-card">
+      <div class="card-header section-heading"><span>Communication activity</span><a href="/activities">View full history →</a></div>
+      <ul class="list-group list-group-flush">
+        <% messageLogs.slice(0, 6).forEach((item) => { %>
+          <li class="list-group-item"><div class="data-row"><div class="row-avatar"><%= item.channel === 'whatsapp' ? 'WA' : 'SMS' %></div><div class="row-copy"><div class="row-title"><%= item.recipient_name || 'Unknown recipient' %></div><div class="row-meta"><%= item.template_key || 'Personal message' %> · <%= item.channel %></div></div><div class="row-date"><%= item.sent_at %></div></div></li>
+        <% }) %>
+        <% if (messageLogs.length === 0) { %><li class="list-group-item empty-state">No messages have been dispatched yet.</li><% } %>
+      </ul>
+    </div>
+  </div>
+</div>
+<%- include('partials/footer') %>

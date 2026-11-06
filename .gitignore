@@ -1,0 +1,28 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+web/data/*.sqlite
+web/uploads/*
+!web/uploads/.gitkeep
+
+# Android & Gradle
+.gradle/
+build/
+*/build/
+local.properties
+*.hprof
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Allow tracked binary releases
+!releases/*.apk
