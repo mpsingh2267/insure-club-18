@@ -1,6 +1,7 @@
 /**
  * InsureClub Cloud Database Console
  * Direct Supabase PostgreSQL Client & Management Application
+ * With Dual-Mode Engine: Seamless Local Sandbox & Live Cloud Sync
  */
 (function() {
   'use strict';
@@ -10,6 +11,9 @@
     url: 'https://insureclub-sync.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imluc3VyZWNsdWItc3luYyIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzA5NzcwMDAwLCJleHAiOjIwMjUzMzAwMDB9.insureclub_default_anon_key_active'
   };
+
+  // Pre-bundled SQL schema for 1-click execution in Supabase SQL editor
+  const SUPABASE_SCHEMA_SQL = "-- InsureClub CRM - Supabase Database Schema\n-- Provides cloud database storage and multi-device sync for customers, policies,\n-- family members, appointments, reminders, document metadata, and templates.\n-- NOTE: In accordance with local-first privacy requirements, physical attached\n-- files (PDFs, images, scans) are stored locally on device storage. Only metadata\n-- is synced in the documents table.\n\n-- 1. Customers Table\nCREATE TABLE IF NOT EXISTS public.customers (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    phone TEXT,\n    email TEXT,\n    city TEXT,\n    address TEXT,\n    date_of_birth DATE,\n    anniversary_date DATE,\n    notes TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 2. Policies Table\n-- Stores all policies. When a policy is renewed, older policies remain intact\n-- with status 'Renewed' or 'Historical' and are NEVER deleted.\nCREATE TABLE IF NOT EXISTS public.policies (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    company_name TEXT NOT NULL,\n    product_name TEXT NOT NULL,\n    category_name TEXT,\n    policy_number TEXT NOT NULL,\n    start_date DATE,\n    renewal_due_date DATE NOT NULL,\n    premium_amount NUMERIC(12, 2) DEFAULT 0,\n    sum_insured NUMERIC(14, 2) DEFAULT 0,\n    status TEXT NOT NULL DEFAULT 'Active', -- 'Active', 'Renewed', 'Historical', 'Expired', 'Cancelled'\n    previous_policy_id TEXT REFERENCES public.policies(id) ON DELETE SET NULL,\n    notes TEXT,\n    has_document BOOLEAN DEFAULT false,\n    document_name TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 3. Family Members Table\nCREATE TABLE IF NOT EXISTS public.family_members (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,\n    full_name TEXT NOT NULL,\n    relationship TEXT NOT NULL,\n    date_of_birth DATE,\n    mobile TEXT,\n    notes TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 4. Appointments Table\nCREATE TABLE IF NOT EXISTS public.appointments (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    date DATE NOT NULL,\n    time TEXT,\n    purpose TEXT NOT NULL,\n    product_name TEXT,\n    company_name TEXT,\n    reminder_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'Scheduled',\n    notes TEXT,\n    follow_up_at TIMESTAMPTZ,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 5. Reminders Table\nCREATE TABLE IF NOT EXISTS public.reminders (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    policy_id TEXT REFERENCES public.policies(id) ON DELETE CASCADE,\n    family_member_id TEXT REFERENCES public.family_members(id) ON DELETE CASCADE,\n    type TEXT NOT NULL,\n    activity TEXT NOT NULL,\n    due_at TIMESTAMPTZ NOT NULL,\n    status TEXT NOT NULL DEFAULT 'Pending',\n    notes TEXT,\n    auto BOOLEAN DEFAULT false,\n    completed_at TIMESTAMPTZ,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 6. Document Metadata Table (Local-First: Binaries stay on local device storage)\n-- Tracks PAN cards, birth certificates, policy documents, Aadhaar cards, etc.\nCREATE TABLE IF NOT EXISTS public.documents (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    policy_id TEXT REFERENCES public.policies(id) ON DELETE SET NULL,\n    family_member_id TEXT REFERENCES public.family_members(id) ON DELETE SET NULL,\n    document_type TEXT NOT NULL, -- 'PAN Card', 'Birth Certificate', 'Aadhaar Card', 'Policy Document', etc.\n    title TEXT NOT NULL,\n    file_name TEXT NOT NULL,\n    file_size BIGINT DEFAULT 0,\n    mime_type TEXT DEFAULT 'application/pdf',\n    local_storage_path TEXT,\n    notes TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 7. Porting Reminders Table\nCREATE TABLE IF NOT EXISTS public.porting_reminders (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    policy_id TEXT REFERENCES public.policies(id) ON DELETE CASCADE,\n    existing_company TEXT,\n    existing_policy TEXT,\n    renewal_date DATE,\n    target_company TEXT,\n    target_product TEXT,\n    reminder_date DATE,\n    status TEXT NOT NULL DEFAULT 'Pending',\n    notes TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 8. Message Templates Table\nCREATE TABLE IF NOT EXISTS public.message_templates (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    type TEXT NOT NULL,\n    body TEXT NOT NULL,\n    is_default BOOLEAN DEFAULT false,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 9. Activities / Audit Logs Table\nCREATE TABLE IF NOT EXISTS public.activities (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT REFERENCES public.customers(id) ON DELETE CASCADE,\n    type TEXT NOT NULL,\n    text TEXT NOT NULL,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- Indexes for lightning fast queries\nCREATE INDEX IF NOT EXISTS idx_customers_phone ON public.customers(phone);\nCREATE INDEX IF NOT EXISTS idx_policies_customer_id ON public.policies(customer_id);\nCREATE INDEX IF NOT EXISTS idx_policies_renewal_due_date ON public.policies(renewal_due_date);\nCREATE INDEX IF NOT EXISTS idx_policies_status ON public.policies(status);\nCREATE INDEX IF NOT EXISTS idx_family_customer_id ON public.family_members(customer_id);\nCREATE INDEX IF NOT EXISTS idx_reminders_due_at ON public.reminders(due_at);\nCREATE INDEX IF NOT EXISTS idx_reminders_status ON public.reminders(status);\nCREATE INDEX IF NOT EXISTS idx_documents_customer_id ON public.documents(customer_id);\nCREATE INDEX IF NOT EXISTS idx_documents_policy_id ON public.documents(policy_id);\nCREATE INDEX IF NOT EXISTS idx_documents_type ON public.documents(document_type);\n\n-- Row Level Security (RLS) Policies\n-- Allow public anon API access for InsureClub CRM client with anon key\nALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.policies ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.family_members ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.reminders ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.porting_reminders ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.message_templates ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.activities ENABLE ROW LEVEL SECURITY;\n\n-- Allow read/write for authenticated users or anon API with project key\nDO $$\nBEGIN\n    DROP POLICY IF EXISTS \"Anon public access to customers\" ON public.customers;\n    CREATE POLICY \"Anon public access to customers\" ON public.customers FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to policies\" ON public.policies;\n    CREATE POLICY \"Anon public access to policies\" ON public.policies FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to family_members\" ON public.family_members;\n    CREATE POLICY \"Anon public access to family_members\" ON public.family_members FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to appointments\" ON public.appointments;\n    CREATE POLICY \"Anon public access to appointments\" ON public.appointments FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to reminders\" ON public.reminders;\n    CREATE POLICY \"Anon public access to reminders\" ON public.reminders FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to documents\" ON public.documents;\n    CREATE POLICY \"Anon public access to documents\" ON public.documents FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to porting_reminders\" ON public.porting_reminders;\n    CREATE POLICY \"Anon public access to porting_reminders\" ON public.porting_reminders FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to message_templates\" ON public.message_templates;\n    CREATE POLICY \"Anon public access to message_templates\" ON public.message_templates FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to activities\" ON public.activities;\n    CREATE POLICY \"Anon public access to activities\" ON public.activities FOR ALL USING (true) WITH CHECK (true);\nEND $$;\n";
 
   // Helper utilities
   const $ = selector => document.querySelector(selector);
@@ -31,6 +35,292 @@
     return `${(b / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  // Detect sandbox placeholder vs real user Supabase project
+  function isPlaceholderUrl(url) {
+    if (!url) return true;
+    const clean = String(url).toLowerCase().trim();
+    return clean.includes('insureclub-sync.supabase.co') ||
+           clean.includes('example.supabase.co') ||
+           clean.includes('placeholder') ||
+           clean.includes('your-project') ||
+           clean.includes('xyz.supabase.co') ||
+           clean === 'https://' ||
+           clean === 'http://';
+  }
+
+  function sanitizeNetworkError(err) {
+    const msg = err?.message || String(err);
+    if (/load failed|failed to fetch|network error|eai_again|getaddrinfo/i.test(msg)) {
+      return 'Could not reach Supabase cloud host. Verify Project URL or internet connection.';
+    }
+    return msg;
+  }
+
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error(`Request timed out after ${timeoutMs / 1000}s`);
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // Built-in Sample CRM Data for Instant Offline Sandbox
+  const SAMPLE_DATA = {
+    customers: [
+      {
+        id: 'cust-demo-1',
+        name: 'Rahul Sharma',
+        phone: '9876543210',
+        city: 'New Delhi',
+        date_of_birth: '1985-05-14',
+        anniversary_date: '2012-11-20',
+        notes: 'VIP Client • Optima Secure Family Floater + Term Life. Prefers renewal notifications via WhatsApp.',
+        created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 2 * 86400000).toISOString()
+      },
+      {
+        id: 'cust-demo-2',
+        name: 'Priya Verma',
+        phone: '9812345678',
+        city: 'Mumbai',
+        date_of_birth: '1990-08-22',
+        anniversary_date: '2018-02-14',
+        notes: 'Senior Product Manager • Pure term protection & critical illness rider. PAN and Birth Certificate on file.',
+        created_at: new Date(Date.now() - 45 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 5 * 86400000).toISOString()
+      },
+      {
+        id: 'cust-demo-3',
+        name: 'Manpreet Singh',
+        phone: '9988776655',
+        city: 'Chandigarh',
+        date_of_birth: '1982-01-10',
+        anniversary_date: '2008-10-18',
+        notes: 'Fleet operator • Private car comprehensive and family health. Porting inquiry pending for parents.',
+        created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 1 * 86400000).toISOString()
+      }
+    ],
+    policies: [
+      {
+        id: 'pol-demo-1',
+        customer_id: 'cust-demo-1',
+        customer_name: 'Rahul Sharma',
+        company_name: 'HDFC ERGO General Insurance',
+        product_name: 'Optima Secure Family Floater',
+        category_name: 'Health Insurance',
+        policy_number: 'HDFC-OPT-884920',
+        start_date: new Date(Date.now() - 340 * 86400000).toISOString().slice(0, 10),
+        renewal_due_date: new Date(Date.now() + 25 * 86400000).toISOString().slice(0, 10),
+        premium_amount: 18500,
+        sum_insured: 1000000,
+        status: 'Active',
+        notes: '2 Adults + 1 Child. Includes 2x Restore benefit and zero deductible.',
+        has_document: true,
+        document_name: 'HDFC_OptimaSecure_Schedule.pdf',
+        created_at: new Date(Date.now() - 340 * 86400000).toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 'pol-demo-2',
+        customer_id: 'cust-demo-1',
+        customer_name: 'Rahul Sharma',
+        company_name: 'Star Health Insurance',
+        product_name: 'Family Health Optima (Previous Year)',
+        category_name: 'Health Insurance',
+        policy_number: 'STAR-FHO-772911',
+        start_date: new Date(Date.now() - 705 * 86400000).toISOString().slice(0, 10),
+        renewal_due_date: new Date(Date.now() - 340 * 86400000).toISOString().slice(0, 10),
+        premium_amount: 14200,
+        sum_insured: 500000,
+        status: 'Renewed',
+        notes: 'PRESERVED HISTORICAL TERM: Upgraded to HDFC ERGO upon renewal. Preserved permanently in database.',
+        has_document: true,
+        document_name: 'StarHealth_PriorYear_Receipt.pdf',
+        created_at: new Date(Date.now() - 705 * 86400000).toISOString(),
+        updated_at: new Date(Date.now() - 340 * 86400000).toISOString()
+      },
+      {
+        id: 'pol-demo-3',
+        customer_id: 'cust-demo-2',
+        customer_name: 'Priya Verma',
+        company_name: 'Tata AIA Life Insurance',
+        product_name: 'Sampoorna Raksha Supreme',
+        category_name: 'Term Life Insurance',
+        policy_number: 'TATA-SRS-551029',
+        start_date: new Date(Date.now() - 200 * 86400000).toISOString().slice(0, 10),
+        renewal_due_date: new Date(Date.now() + 165 * 86400000).toISOString().slice(0, 10),
+        premium_amount: 24000,
+        sum_insured: 10000000,
+        status: 'Active',
+        notes: 'Sum Insured: ₹1.00 Crore. Term up to age 75 with critical illness rider.',
+        has_document: true,
+        document_name: 'Tata_Sampoorna_Policy.pdf',
+        created_at: new Date(Date.now() - 200 * 86400000).toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 'pol-demo-4',
+        customer_id: 'cust-demo-3',
+        customer_name: 'Manpreet Singh',
+        company_name: 'ICICI Lombard General Insurance',
+        product_name: 'Private Car Comprehensive Policy',
+        category_name: 'Motor Insurance',
+        policy_number: 'ICICI-MOT-991204',
+        start_date: new Date(Date.now() - 120 * 86400000).toISOString().slice(0, 10),
+        renewal_due_date: new Date(Date.now() + 245 * 86400000).toISOString().slice(0, 10),
+        premium_amount: 12800,
+        sum_insured: 650000,
+        status: 'Active',
+        notes: 'Hyundai Creta 1.5 SX. Zero depreciation + Return to Invoice cover.',
+        has_document: true,
+        document_name: 'ICICI_Car_Insurance_Schedule.pdf',
+        created_at: new Date(Date.now() - 120 * 86400000).toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    ],
+    familyMembers: [
+      {
+        id: 'fam-demo-1',
+        customer_id: 'cust-demo-1',
+        full_name: 'Priya Sharma',
+        relationship: 'Spouse',
+        date_of_birth: '1988-03-12',
+        mobile: '9876543211',
+        notes: 'Covered under HDFC ERGO family floater'
+      },
+      {
+        id: 'fam-demo-2',
+        customer_id: 'cust-demo-1',
+        full_name: 'Aarav Sharma',
+        relationship: 'Son',
+        date_of_birth: '2015-09-04',
+        mobile: null,
+        notes: 'Birth certificate registered in local document vault'
+      },
+      {
+        id: 'fam-demo-3',
+        customer_id: 'cust-demo-2',
+        full_name: 'Vikram Verma',
+        relationship: 'Spouse',
+        date_of_birth: '1989-12-05',
+        mobile: '9812345679',
+        notes: 'Nominee for Tata AIA Term Life policy'
+      }
+    ],
+    documents: [
+      {
+        id: 'doc-demo-1',
+        customer_id: 'cust-demo-1',
+        customer_name: 'Rahul Sharma',
+        document_type: 'PAN Card',
+        title: 'Rahul Sharma Verified PAN Card',
+        file_name: 'PAN_RahulSharma_Original.pdf',
+        file_size: 425984,
+        mime_type: 'application/pdf',
+        local_storage_path: '/storage/emulated/0/InsureClub/documents/PAN_RahulSharma.pdf',
+        notes: 'Physical binary file stays on local device storage. Cloud synchronizes metadata.',
+        created_at: new Date(Date.now() - 60 * 86400000).toISOString()
+      },
+      {
+        id: 'doc-demo-2',
+        customer_id: 'cust-demo-1',
+        customer_name: 'Rahul Sharma',
+        document_type: 'Birth Certificate',
+        title: 'Aarav Sharma Municipal Birth Certificate',
+        file_name: 'BirthCertificate_Aarav.pdf',
+        file_size: 819200,
+        mime_type: 'application/pdf',
+        local_storage_path: '/storage/emulated/0/InsureClub/documents/BC_Aarav.pdf',
+        notes: 'Attached for age verification in family floater.',
+        created_at: new Date(Date.now() - 55 * 86400000).toISOString()
+      },
+      {
+        id: 'doc-demo-3',
+        customer_id: 'cust-demo-1',
+        customer_name: 'Rahul Sharma',
+        document_type: 'Policy Document',
+        title: 'HDFC ERGO Optima Secure Schedule',
+        file_name: 'HDFC_OptimaSecure_Schedule.pdf',
+        file_size: 1450000,
+        mime_type: 'application/pdf',
+        local_storage_path: '/storage/emulated/0/InsureClub/documents/Policy_HDFC_884920.pdf',
+        notes: 'Complete terms & conditions schedule.',
+        created_at: new Date(Date.now() - 340 * 86400000).toISOString()
+      },
+      {
+        id: 'doc-demo-4',
+        customer_id: 'cust-demo-2',
+        customer_name: 'Priya Verma',
+        document_type: 'PAN Card',
+        title: 'Priya Verma Verified PAN Card',
+        file_name: 'PAN_PriyaVerma_Scan.jpg',
+        file_size: 312000,
+        mime_type: 'image/jpeg',
+        local_storage_path: '/storage/emulated/0/InsureClub/documents/PAN_PriyaVerma.jpg',
+        notes: 'Verified e-PAN copy for KYC completion.',
+        created_at: new Date(Date.now() - 45 * 86400000).toISOString()
+      }
+    ],
+    appointments: [
+      {
+        id: 'apt-demo-1',
+        customer_id: 'cust-demo-1',
+        customer_name: 'Rahul Sharma',
+        date: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10),
+        time: '11:30 AM',
+        purpose: 'Annual Health Portfolio Review & Super Top-Up Proposal',
+        company_name: 'HDFC ERGO',
+        product_name: 'my:health Medisure Super Top Up',
+        status: 'Scheduled',
+        notes: 'Review restoration benefits and consider ₹25L super top-up coverage.',
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'apt-demo-2',
+        customer_id: 'cust-demo-3',
+        customer_name: 'Manpreet Singh',
+        date: new Date(Date.now() + 12 * 86400000).toISOString().slice(0, 10),
+        time: '04:00 PM',
+        purpose: 'Commercial Vehicle Porting Consultation',
+        company_name: 'ICICI Lombard',
+        product_name: 'Commercial Goods Carrier Package',
+        status: 'Scheduled',
+        notes: 'Discuss fleet renewal terms and NCB discount transfer.',
+        created_at: new Date().toISOString()
+      }
+    ],
+    reminders: [
+      {
+        id: 'rem-demo-1',
+        customer_id: 'cust-demo-1',
+        customer_name: 'Rahul Sharma',
+        type: 'Policy Renewal',
+        activity: 'HDFC ERGO Optima Secure Renewal Due (₹18,500)',
+        due_at: new Date(Date.now() + 20 * 86400000).toISOString(),
+        status: 'Pending',
+        notes: 'Send payment link via WhatsApp and verify no-claim cumulative bonus multiplier.',
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'rem-demo-2',
+        customer_id: 'cust-demo-2',
+        customer_name: 'Priya Verma',
+        type: 'Birthday Wish',
+        activity: 'Send Birthday Greetings & Policy Health Checkup Reminder',
+        due_at: new Date(Date.now() + 14 * 86400000).toISOString(),
+        status: 'Pending',
+        notes: 'Send personalized birthday graphic greeting.',
+        created_at: new Date().toISOString()
+      }
+    ]
+  };
+
   // Application State
   let state = {
     customers: [],
@@ -47,8 +337,24 @@
     policyFilter: 'all',
     docFilter: 'all',
     lastSyncAt: null,
-    connectionStatus: 'connecting' // 'connected', 'connecting', 'offline'
+    connectionStatus: 'sandbox' // 'sandbox', 'connected', 'connecting', 'offline'
   };
+
+  function isSandboxMode() {
+    return isPlaceholderUrl(state.supabase?.url);
+  }
+
+  function seedSampleDataIfNeeded() {
+    if (!state.customers || state.customers.length === 0) {
+      state.customers = JSON.parse(JSON.stringify(SAMPLE_DATA.customers));
+      state.policies = JSON.parse(JSON.stringify(SAMPLE_DATA.policies));
+      state.familyMembers = JSON.parse(JSON.stringify(SAMPLE_DATA.familyMembers));
+      state.documents = JSON.parse(JSON.stringify(SAMPLE_DATA.documents));
+      state.appointments = JSON.parse(JSON.stringify(SAMPLE_DATA.appointments));
+      state.reminders = JSON.parse(JSON.stringify(SAMPLE_DATA.reminders));
+      persistState();
+    }
+  }
 
   // Load persisted cache
   try {
@@ -102,13 +408,16 @@
     },
 
     async query(table, params = '') {
+      if (isPlaceholderUrl(this.getBaseUrl())) {
+        return [];
+      }
       const url = `${this.getBaseUrl()}/rest/v1/${table}${params ? (params.startsWith('?') ? params : '?' + params) : ''}`;
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         method: 'GET',
         headers: this.getHeaders()
-      });
+      }, 8000);
       if (!res.ok) {
-        const text = await res.text();
+        const text = await res.text().catch(() => '');
         throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
       }
       return await res.json();
@@ -116,16 +425,16 @@
 
     async upsert(table, payload) {
       const url = `${this.getBaseUrl()}/rest/v1/${table}`;
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
           ...this.getHeaders(),
           'Prefer': 'resolution=merge-duplicates,return=representation'
         },
         body: JSON.stringify(payload)
-      });
+      }, 9000);
       if (!res.ok) {
-        const text = await res.text();
+        const text = await res.text().catch(() => '');
         throw new Error(`Upsert error (${res.status}): ${text || res.statusText}`);
       }
       return await res.json();
@@ -133,12 +442,12 @@
 
     async remove(table, id) {
       const url = `${this.getBaseUrl()}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`;
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         method: 'DELETE',
         headers: this.getHeaders()
-      });
+      }, 8000);
       if (!res.ok) {
-        const text = await res.text();
+        const text = await res.text().catch(() => '');
         throw new Error(`Delete error (${res.status}): ${text || res.statusText}`);
       }
       return true;
@@ -147,18 +456,88 @@
     async ping(url, key) {
       const cleanUrl = (url || this.getBaseUrl()).replace(/\/+$/, '');
       const cleanKey = key || (state.supabase.anonKey || DEFAULT_SUPABASE.anonKey);
+      if (isPlaceholderUrl(cleanUrl)) {
+        throw new Error('Default placeholder URL is not an active Supabase project. Enter your real project URL.');
+      }
       const start = performance.now();
-      const res = await fetch(`${cleanUrl}/rest/v1/customers?select=count&limit=1`, {
+      const res = await fetchWithTimeout(`${cleanUrl}/rest/v1/customers?select=count&limit=1`, {
         method: 'GET',
         headers: {
           'apikey': cleanKey,
           'Authorization': `Bearer ${cleanKey}`,
           'Accept': 'application/json'
         }
-      });
+      }, 7000);
       const duration = Math.round(performance.now() - start);
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+      }
       return { success: true, latency: duration };
+    }
+  };
+
+  // --- Unified Dual-Mode DataStore ---
+  const DataStore = {
+    isSandbox() {
+      return isSandboxMode();
+    },
+
+    tableToListKey(table) {
+      if (table === 'family_members') return 'familyMembers';
+      return table;
+    },
+
+    async upsert(table, record) {
+      const listKey = this.tableToListKey(table);
+      const arr = state[listKey] || [];
+      const idx = arr.findIndex(x => x.id === record.id);
+      if (idx >= 0) {
+        arr[idx] = { ...arr[idx], ...record };
+      } else {
+        arr.unshift(record);
+      }
+      state[listKey] = arr;
+      persistState();
+      renderAll();
+
+      if (!this.isSandbox()) {
+        try {
+          await Supabase.upsert(table, record);
+        } catch (err) {
+          console.warn(`Supabase upsert cloud notice for ${table}:`, err);
+          throw new Error(sanitizeNetworkError(err));
+        }
+      }
+      return record;
+    },
+
+    async remove(table, id) {
+      const listKey = this.tableToListKey(table);
+      state[listKey] = (state[listKey] || []).filter(x => x.id !== id);
+      persistState();
+      renderAll();
+
+      if (!this.isSandbox()) {
+        try {
+          await Supabase.remove(table, id);
+        } catch (err) {
+          console.warn(`Supabase delete cloud notice for ${table}:`, err);
+          throw new Error(sanitizeNetworkError(err));
+        }
+      }
+      return true;
+    },
+
+    async fetchAll(silent = false) {
+      if (this.isSandbox()) {
+        seedSampleDataIfNeeded();
+        setConnectionStatus('sandbox');
+        renderAll();
+        if (!silent) toast('Local Sandbox active: All features ready offline ✓', 'info');
+        return true;
+      }
+      return await fetchCloudData(silent);
     }
   };
 
@@ -168,8 +547,17 @@
   let wsMsgRef = 1;
 
   function initRealtime() {
-    const url = state.supabase?.url || DEFAULT_SUPABASE.url;
-    const key = state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
+    if (isSandboxMode()) {
+      if (realtimeWs) {
+        try { realtimeWs.close(); } catch {}
+        realtimeWs = null;
+      }
+      clearInterval(realtimeHeartbeat);
+      return;
+    }
+
+    const url = state.supabase?.url;
+    const key = state.supabase?.anonKey;
     if (!url || !key) return;
 
     try {
@@ -220,7 +608,9 @@
 
       realtimeWs.onclose = () => {
         clearInterval(realtimeHeartbeat);
-        setTimeout(initRealtime, 8000);
+        if (!isSandboxMode()) {
+          setTimeout(initRealtime, 8000);
+        }
       };
 
       realtimeWs.onerror = () => {
@@ -278,20 +668,40 @@
     toast(`Cloud update received (${table})`);
   }
 
-  function setConnectionStatus(status) {
+  function setConnectionStatus(status, detail) {
     state.connectionStatus = status;
     const pill = $('#connectionPill');
     const txt = $('#connectionText');
-    if (!pill || !txt) return;
+    const banner = $('#sandboxBanner');
 
-    pill.className = `status-pill ${status}`;
-    if (status === 'connected') txt.textContent = 'Supabase Connected';
-    else if (status === 'connecting') txt.textContent = 'Connecting…';
-    else txt.textContent = 'Offline / Local Cache';
+    if (pill && txt) {
+      pill.className = `status-pill ${status}`;
+      if (status === 'sandbox') {
+        txt.textContent = 'Local Sandbox Mode';
+        pill.title = 'Running in Local Sandbox Mode — Click to configure live Supabase';
+      } else if (status === 'connected') {
+        txt.textContent = detail ? `Supabase Connected (${detail})` : 'Supabase Connected';
+        pill.title = 'Connected to Supabase PostgreSQL cloud';
+      } else if (status === 'connecting') {
+        txt.textContent = 'Connecting to Supabase…';
+        pill.title = 'Connecting to Supabase cloud';
+      } else {
+        txt.textContent = 'Cloud Offline / Local Cache';
+        pill.title = 'Supabase unreachable — using local storage cache';
+      }
+    }
+
+    if (banner) {
+      banner.style.display = status === 'sandbox' ? 'flex' : 'none';
+    }
   }
 
   // --- Fetch All Data from Supabase ---
   async function fetchCloudData(silent = false) {
+    if (isSandboxMode()) {
+      return await DataStore.fetchAll(silent);
+    }
+
     if (!silent) setConnectionStatus('connecting');
     const refreshBtn = $('#refreshCloudBtn');
     if (refreshBtn) refreshBtn.classList.add('spinning');
@@ -325,9 +735,10 @@
       if (!silent) toast('Synced live with Supabase cloud database ✓', 'success');
       return true;
     } catch (err) {
-      console.warn('fetchCloudData error:', err);
+      console.warn('fetchCloudData notice:', err);
       setConnectionStatus('offline');
-      if (!silent) toast(`Cloud sync notice: ${err.message}`, 'error');
+      const friendly = sanitizeNetworkError(err);
+      if (!silent) toast(`Cloud sync notice: ${friendly}`, 'error');
       renderAll();
       return false;
     } finally {
@@ -401,349 +812,241 @@
 
     if ($('#kpiCustomers')) $('#kpiCustomers').textContent = state.customers.length;
     if ($('#kpiActivePolicies')) $('#kpiActivePolicies').textContent = activePols.length;
-    if ($('#kpiPreservedPolicies')) $('#kpiPreservedPolicies').textContent = `${preservedPols.length} historical policies preserved`;
-    if ($('#kpiTotalPremium')) $('#kpiTotalPremium').textContent = fmtCurrency(totalPremium);
-    if ($('#kpiSumInsured')) $('#kpiSumInsured').textContent = `Total Sum Insured: ${fmtCurrency(totalSumInsured)}`;
-    if ($('#kpiDocCount')) $('#kpiDocCount').textContent = state.documents.length;
+    if ($('#kpiPreservedPolicies')) $('#kpiPreservedPolicies').textContent = `${preservedPols.length} historical term${preservedPols.length === 1 ? '' : 's'} preserved`;
+    if ($('#kpiPremium')) $('#kpiPremium').textContent = fmtCurrency(totalPremium);
+    if ($('#kpiCoverage')) $('#kpiCoverage').textContent = fmtCurrency(totalSumInsured);
 
-    // Upcoming renewals in next 30 days
-    const now = new Date();
-    const future30 = new Date();
-    future30.setDate(future30.getDate() + 30);
-    const nowStr = now.toISOString().slice(0, 10);
-    const future30Str = future30.toISOString().slice(0, 10);
-
-    const upcoming = state.policies.filter(p => p.renewal_due_date && p.renewal_due_date >= nowStr && p.renewal_due_date <= future30Str && (p.status || 'Active').toLowerCase() === 'active');
-    if ($('#renewalCountBadge')) $('#renewalCountBadge').textContent = `${upcoming.length} due`;
-
-    const tbody = $('#upcomingRenewalsTable');
-    if (tbody) {
-      if (upcoming.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No renewals due in the next 30 days</td></tr>';
+    // Recent Policies Table
+    const polTbody = $('#recentPoliciesTable tbody');
+    if (polTbody) {
+      if (state.policies.length === 0) {
+        polTbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No policies recorded yet.</td></tr>';
       } else {
-        tbody.innerHTML = upcoming.map(p => `
+        polTbody.innerHTML = state.policies.slice(0, 6).map(p => `
           <tr>
-            <td><strong>${esc(p.customer_name || 'Customer')}</strong></td>
-            <td>${esc(p.product_name)}</td>
-            <td>${esc(p.company_name)}</td>
-            <td><span class="badge yellow">${fmtDate(p.renewal_due_date)}</span></td>
+            <td><strong>${esc(p.policy_number)}</strong></td>
+            <td>${esc(p.customer_name || '—')}</td>
+            <td>${esc(p.company_name)} • ${esc(p.product_name)}</td>
             <td><strong>${fmtCurrency(p.premium_amount)}</strong></td>
-            <td><button class="btn sm primary" data-renew-policy="${esc(p.id)}">Renew</button></td>
+            <td>${fmtDate(p.renewal_due_date)}</td>
+            <td><span class="badge status-${(p.status || 'Active').toLowerCase()}">${esc(p.status || 'Active')}</span></td>
           </tr>
         `).join('');
       }
     }
 
-    // Distribution
-    if ($('#distCustomers')) $('#distCustomers').textContent = `${state.customers.length} rows`;
-    if ($('#distPolicies')) $('#distPolicies').textContent = `${state.policies.length} rows`;
-    if ($('#distFamily')) $('#distFamily').textContent = `${state.familyMembers.length} rows`;
-    if ($('#distAppointments')) $('#distAppointments').textContent = `${state.appointments.length} rows`;
-    if ($('#distReminders')) $('#distReminders').textContent = `${state.reminders.length} rows`;
-    if ($('#distDocs')) $('#distDocs').textContent = `${state.documents.length} rows`;
+    // Reminders Feed
+    const remFeed = $('#upcomingRemindersFeed');
+    if (remFeed) {
+      const pendingReminders = state.reminders.filter(r => (r.status || 'Pending').toLowerCase() === 'pending').slice(0, 5);
+      if (pendingReminders.length === 0) {
+        remFeed.innerHTML = '<div class="empty-feed">No pending reminders. All tasks caught up!</div>';
+      } else {
+        remFeed.innerHTML = pendingReminders.map(r => `
+          <div class="feed-item">
+            <div class="feed-icon">${r.type === 'Policy Renewal' ? '📋' : (r.type === 'Birthday Wish' ? '🎂' : '⏰')}</div>
+            <div class="feed-body">
+              <div class="feed-title">${esc(r.activity)}</div>
+              <div class="feed-meta">${esc(r.customer_name || 'Client')} • Due: ${fmtDate(r.due_at)}</div>
+            </div>
+            <button class="btn sm secondary" data-complete-reminder="${esc(r.id)}">Done</button>
+          </div>
+        `).join('');
+      }
+    }
+
+    // Appointments Feed
+    const aptFeed = $('#upcomingAppointmentsFeed');
+    if (aptFeed) {
+      const pendingApts = state.appointments.filter(a => (a.status || 'Scheduled').toLowerCase() === 'scheduled').slice(0, 5);
+      if (pendingApts.length === 0) {
+        aptFeed.innerHTML = '<div class="empty-feed">No appointments scheduled.</div>';
+      } else {
+        aptFeed.innerHTML = pendingApts.map(a => `
+          <div class="feed-item">
+            <div class="feed-icon">📅</div>
+            <div class="feed-body">
+              <div class="feed-title">${esc(a.purpose)}</div>
+              <div class="feed-meta">${esc(a.customer_name || 'Client')} • ${fmtDate(a.date)} at ${esc(a.time || 'TBD')}</div>
+            </div>
+            <span class="badge info">${esc(a.status)}</span>
+          </div>
+        `).join('');
+      }
+    }
   }
 
   // 2. Customers Renderer
   function renderCustomers() {
-    const q = ($('#customerSearch')?.value || '').toLowerCase().trim();
-    const filtered = state.customers.filter(c => {
-      if (!q) return true;
-      return (c.name || '').toLowerCase().includes(q) ||
-             (c.phone || '').toLowerCase().includes(q) ||
-             (c.city || '').toLowerCase().includes(q) ||
-             (c.id || '').toLowerCase().includes(q);
-    });
-
-    const tbody = $('#customersTableBody');
+    const tbody = $('#customersTable tbody');
     if (!tbody) return;
 
+    const query = ($('#customerSearch')?.value || '').toLowerCase().trim();
+    const filtered = state.customers.filter(c => {
+      if (!query) return true;
+      return (c.name || '').toLowerCase().includes(query) ||
+             (c.phone || '').toLowerCase().includes(query) ||
+             (c.city || '').toLowerCase().includes(query);
+    });
+
     if (filtered.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No customers found matching search</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No matching customers found.</td></tr>';
       return;
     }
 
     tbody.innerHTML = filtered.map(c => {
-      const polCount = state.policies.filter(p => p.customer_id === c.id).length;
-      const famCount = state.familyMembers.filter(f => f.customer_id === c.id).length;
-      const docCount = state.documents.filter(d => d.customer_id === c.id).length;
+      const customerPols = state.policies.filter(p => p.customer_id === c.id);
+      const activePols = customerPols.filter(p => (p.status || 'Active').toLowerCase() === 'active');
+      const totalPrem = activePols.reduce((sum, p) => sum + Number(p.premium_amount || 0), 0);
+      const customerDocs = state.documents.filter(d => d.customer_id === c.id);
+
       return `
         <tr>
           <td>
-            <a href="#" class="table-link" data-view-customer="${esc(c.id)}"><strong>${esc(c.name)}</strong></a>
-            <div style="font-size:11px;color:var(--text-muted)">ID: ${esc(c.id)}</div>
+            <div class="cust-name-cell">
+              <span class="cust-avatar">${esc(c.name.slice(0, 2).toUpperCase())}</span>
+              <div>
+                <a href="#" class="cust-link" data-view-customer="${esc(c.id)}">${esc(c.name)}</a>
+                <div class="table-subtext">${esc(c.city || 'No city')}</div>
+              </div>
+            </div>
           </td>
           <td>${esc(c.phone || '—')}</td>
-          <td>${esc(c.city || '—')}</td>
-          <td><span class="badge ${polCount > 0 ? 'green' : ''}">${polCount} policies</span></td>
-          <td>${famCount}</td>
-          <td><span class="badge ${docCount > 0 ? 'blue' : ''}">${docCount} docs</span></td>
-          <td>${fmtDate(c.created_at)}</td>
-          <td style="text-align:right">
-            <button class="btn sm secondary" data-view-customer="${esc(c.id)}">View</button>
-            <button class="btn sm secondary" data-edit-customer="${esc(c.id)}">Edit</button>
-            <button class="btn sm danger" data-delete-customer="${esc(c.id)}" style="color:var(--danger)">Delete</button>
+          <td>
+            <span class="badge ${activePols.length > 0 ? 'success' : 'default'}">
+              ${activePols.length} Active / ${customerPols.length} Total
+            </span>
+          </td>
+          <td><strong>${fmtCurrency(totalPrem)}</strong></td>
+          <td>
+            <span class="badge info">${customerDocs.length} files attached</span>
+          </td>
+          <td class="action-cell">
+            <button class="icon-btn" data-view-customer="${esc(c.id)}" title="View Customer Dossier">👁️</button>
+            <button class="icon-btn" data-edit-customer="${esc(c.id)}" title="Edit Customer">✏️</button>
+            <button class="icon-btn delete" data-delete-customer="${esc(c.id)}" title="Delete Customer">🗑️</button>
           </td>
         </tr>
       `;
     }).join('');
   }
 
-  // 3. Policies Renderer
-  function renderPolicies() {
-    const q = ($('#policySearch')?.value || '').toLowerCase().trim();
-    const filter = state.policyFilter || 'all';
-
-    const filtered = state.policies.filter(p => {
-      const status = (p.status || 'Active').toLowerCase();
-      if (filter === 'active' && status !== 'active') return false;
-      if (filter === 'renewed' && status !== 'renewed') return false;
-      if (filter === 'historical' && !['historical', 'expired'].includes(status)) return false;
-
-      if (!q) return true;
-      return (p.policy_number || '').toLowerCase().includes(q) ||
-             (p.customer_name || '').toLowerCase().includes(q) ||
-             (p.company_name || '').toLowerCase().includes(q) ||
-             (p.product_name || '').toLowerCase().includes(q);
-    });
-
-    const tbody = $('#policiesTableBody');
-    if (!tbody) return;
-
-    if (filtered.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No policies found matching filter</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = filtered.map(p => {
-      const isRenewed = (p.status || '').toLowerCase() === 'renewed';
-      const statusBadge = isRenewed ? '<span class="badge yellow">Renewed (Preserved)</span>' : ((p.status || 'Active') === 'Active' ? '<span class="badge green">Active</span>' : `<span class="badge">${esc(p.status)}</span>`);
-
-      return `
-        <tr>
-          <td>
-            <strong>${esc(p.customer_name || 'Customer')}</strong>
-            <div style="font-size:11px;color:var(--text-muted)">CID: ${esc(p.customer_id)}</div>
-          </td>
-          <td>
-            <strong>${esc(p.company_name)}</strong>
-            <div>${esc(p.product_name)}</div>
-          </td>
-          <td><code>${esc(p.policy_number)}</code></td>
-          <td>${fmtDate(p.renewal_due_date)}</td>
-          <td><strong>${fmtCurrency(p.premium_amount)}</strong></td>
-          <td>${fmtCurrency(p.sum_insured)}</td>
-          <td>${statusBadge}</td>
-          <td style="text-align:right">
-            ${!isRenewed ? `<button class="btn sm primary" data-renew-policy="${esc(p.id)}">Renew</button>` : ''}
-            <button class="btn sm secondary" data-edit-policy="${esc(p.id)}">Edit</button>
-            <button class="btn sm danger" data-delete-policy="${esc(p.id)}" style="color:var(--danger)">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join('');
-  }
-
-  // 4. Documents Renderer
-  function renderDocuments() {
-    const q = ($('#docSearch')?.value || '').toLowerCase().trim();
-    const filter = state.docFilter || 'all';
-
-    const filtered = state.documents.filter(d => {
-      if (filter !== 'all' && (d.document_type || '') !== filter) return false;
-      if (!q) return true;
-      return (d.title || '').toLowerCase().includes(q) ||
-             (d.customer_name || '').toLowerCase().includes(q) ||
-             (d.file_name || '').toLowerCase().includes(q) ||
-             (d.document_type || '').toLowerCase().includes(q);
-    });
-
-    const tbody = $('#documentsTableBody');
-    if (!tbody) return;
-
-    if (filtered.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No document records found</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = filtered.map(d => `
-      <tr>
-        <td><strong>${esc(d.title)}</strong></td>
-        <td><span class="badge blue">${esc(d.document_type || 'Document')}</span></td>
-        <td>${esc(d.customer_name || 'Customer')}</td>
-        <td><code>${esc(d.file_name)}</code></td>
-        <td>${fmtFileSize(d.file_size)}</td>
-        <td><span style="font-size:11px;color:var(--text-muted)">${esc(d.mime_type || 'application/pdf')}</span></td>
-        <td>${fmtDate(d.created_at)}</td>
-        <td style="text-align:right">
-          <button class="btn sm danger" data-delete-doc="${esc(d.id)}" style="color:var(--danger)">Delete</button>
-        </td>
-      </tr>
-    `).join('');
-  }
-
-  // 5. Appointments Renderer
-  function renderAppointments() {
-    const tbody = $('#appointmentsTableBody');
-    if (!tbody) return;
-
-    if (state.appointments.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No appointments scheduled</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = state.appointments.map(a => `
-      <tr>
-        <td><strong>${esc(a.customer_name || 'Customer')}</strong></td>
-        <td>${esc(a.purpose)}</td>
-        <td>${fmtDate(a.date)} ${esc(a.time || '')}</td>
-        <td>${esc(a.company_name || '—')} ${esc(a.product_name ? '· ' + a.product_name : '')}</td>
-        <td><span class="badge ${a.status === 'Completed' ? 'green' : 'yellow'}">${esc(a.status || 'Scheduled')}</span></td>
-        <td>${esc(a.notes || '—')}</td>
-        <td style="text-align:right">
-          <button class="btn sm danger" data-delete-apt="${esc(a.id)}" style="color:var(--danger)">Delete</button>
-        </td>
-      </tr>
-    `).join('');
-  }
-
-  // 6. Reminders Renderer
-  function renderReminders() {
-    const tbody = $('#remindersTableBody');
-    if (!tbody) return;
-
-    if (state.reminders.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No reminders in queue</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = state.reminders.map(r => `
-      <tr>
-        <td><strong>${esc(r.customer_name || 'General')}</strong></td>
-        <td><span class="badge blue">${esc(r.type || 'Reminder')}</span></td>
-        <td>${esc(r.activity)}</td>
-        <td>${fmtDate(r.due_at)}</td>
-        <td><span class="badge ${r.status === 'Completed' ? 'green' : 'yellow'}">${esc(r.status || 'Pending')}</span></td>
-        <td style="text-align:right">
-          ${r.status !== 'Completed' ? `<button class="btn sm primary" data-complete-reminder="${esc(r.id)}">Complete</button>` : ''}
-          <button class="btn sm danger" data-delete-reminder="${esc(r.id)}" style="color:var(--danger)">Delete</button>
-        </td>
-      </tr>
-    `).join('');
-  }
-
-  // 7. Raw Table Explorer Renderer
-  function renderRawExplorer() {
-    const tableSelect = $('#rawTableSelect');
-    const tableName = tableSelect ? tableSelect.value : 'customers';
-    const rows = state[tableName === 'family_members' ? 'familyMembers' : tableName] || [];
-
-    if ($('#rawRowCount')) $('#rawRowCount').textContent = `${rows.length} rows`;
-
-    const thead = $('#rawTableHead');
-    const tbody = $('#rawTableBody');
-    if (!thead || !tbody) return;
-
-    if (rows.length === 0) {
-      thead.innerHTML = '<tr><th>Table columns</th></tr>';
-      tbody.innerHTML = `<tr><td class="table-empty">Table "${tableName}" is currently empty in cloud database</td></tr>`;
-      return;
-    }
-
-    const columns = Object.keys(rows[0]);
-    thead.innerHTML = `<tr>${columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
-    tbody.innerHTML = rows.map(row => `
-      <tr>${columns.map(c => {
-        const val = row[c];
-        const display = typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val ?? '');
-        return `<td>${esc(display)}</td>`;
-      }).join('')}</tr>
-    `).join('');
-  }
-
-  // --- Customer Drawer Detail View ---
+  // 3. Customer Detail Drawer
   function renderCustomerDrawer(customerId) {
     const c = state.customers.find(x => x.id === customerId);
     if (!c) return;
 
-    const pols = state.policies.filter(p => p.customer_id === c.id);
-    const fams = state.familyMembers.filter(f => f.customer_id === c.id);
-    const docs = state.documents.filter(d => d.customer_id === c.id);
-    const apts = state.appointments.filter(a => a.customer_id === c.id);
+    const drawer = $('#customerDrawer');
+    const body = $('#customerDrawerBody');
+    if (!drawer || !body) return;
 
-    $('#drawerCustomerName').textContent = c.name;
-    const body = $('#drawerBody');
-    if (!body) return;
+    const pols = state.policies.filter(p => p.customer_id === c.id);
+    const activePols = pols.filter(p => (p.status || 'Active').toLowerCase() === 'active');
+    const preservedPols = pols.filter(p => ['renewed', 'historical'].includes((p.status || '').toLowerCase()));
+    const fam = state.familyMembers.filter(f => f.customer_id === c.id);
+    const docs = state.documents.filter(d => d.customer_id === c.id);
 
     body.innerHTML = `
-      <div style="margin-bottom:20px;padding:16px;background:var(--surface-alt);border-radius:var(--radius-md)">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-          <div>
-            <div style="font-size:12px;color:var(--text-muted)">Mobile</div>
-            <strong>${esc(c.phone || '—')}</strong>
-          </div>
-          <div>
-            <div style="font-size:12px;color:var(--text-muted)">City</div>
-            <strong>${esc(c.city || '—')}</strong>
-          </div>
-          <div>
-            <div style="font-size:12px;color:var(--text-muted)">Date of Birth</div>
-            <strong>${fmtDate(c.date_of_birth)}</strong>
-          </div>
+      <div class="drawer-header-info">
+        <div class="drawer-avatar">${esc(c.name.slice(0, 2).toUpperCase())}</div>
+        <div>
+          <h2>${esc(c.name)}</h2>
+          <div class="drawer-meta">${esc(c.phone || 'No phone')} • ${esc(c.city || 'No location')}</div>
         </div>
-        ${c.notes ? `<div style="margin-top:10px;font-size:12.5px;color:var(--text-muted);border-top:1px solid var(--border);padding-top:8px"><strong>Notes:</strong> ${esc(c.notes)}</div>` : ''}
       </div>
 
-      <div style="margin-bottom:24px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <h4 style="font-size:14px;font-weight:750">Policies (${pols.length})</h4>
-          <button class="btn sm secondary" data-modal="policyModal" data-prefill-customer="${esc(c.id)}">＋ Add Policy</button>
+      <div class="drawer-kpis">
+        <div class="drawer-kpi">
+          <span>Active Policies</span>
+          <strong>${activePols.length}</strong>
         </div>
-        ${pols.length === 0 ? '<div style="font-size:12.5px;color:var(--text-muted)">No policies attached</div>' : `
-          <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="drawer-kpi">
+          <span>Preserved Terms</span>
+          <strong>${preservedPols.length}</strong>
+        </div>
+        <div class="drawer-kpi">
+          <span>Documents</span>
+          <strong>${docs.length}</strong>
+        </div>
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-sec-head">
+          <h3>Customer Profile</h3>
+          <button class="btn sm secondary" data-edit-customer="${esc(c.id)}">Edit</button>
+        </div>
+        <div class="profile-grid">
+          <div><label>Date of Birth</label><div>${fmtDate(c.date_of_birth)}</div></div>
+          <div><label>Anniversary</label><div>${fmtDate(c.anniversary_date)}</div></div>
+          <div style="grid-column: span 2"><label>Notes</label><div>${esc(c.notes || 'None')}</div></div>
+        </div>
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-sec-head">
+          <h3>Policies (${pols.length})</h3>
+          <button class="btn sm primary" data-modal="policyModal" data-prefill-customer="${esc(c.id)}">＋ Add Policy</button>
+        </div>
+        ${pols.length === 0 ? '<p class="empty-text">No policies registered.</p>' : `
+          <div class="mini-list">
             ${pols.map(p => `
-              <div style="padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:space-between">
-                <div>
-                  <strong>${esc(p.company_name)} · ${esc(p.product_name)}</strong>
-                  <div style="font-size:11.5px;color:var(--text-muted)">Policy: ${esc(p.policy_number)} · Due: ${fmtDate(p.renewal_due_date)}</div>
+              <div class="mini-card ${(p.status || '').toLowerCase()}">
+                <div class="mini-head">
+                  <strong>${esc(p.product_name)}</strong>
+                  <span class="badge status-${(p.status || 'Active').toLowerCase()}">${esc(p.status || 'Active')}</span>
                 </div>
-                <div style="text-align:right">
-                  <strong>${fmtCurrency(p.premium_amount)}</strong>
-                  <div><span class="badge ${(p.status || 'Active').toLowerCase() === 'active' ? 'green' : 'yellow'}">${esc(p.status || 'Active')}</span></div>
+                <div class="mini-sub">${esc(p.company_name)} • No: ${esc(p.policy_number)}</div>
+                <div class="mini-foot">
+                  <span>Premium: ${fmtCurrency(p.premium_amount)}</span>
+                  <span>Due: ${fmtDate(p.renewal_due_date)}</span>
                 </div>
+                ${p.status === 'Active' ? `
+                  <button class="btn sm secondary" style="margin-top:8px; width:100%" data-renew-policy="${esc(p.id)}">
+                    🔄 Renew Policy (Preserves this record)
+                  </button>
+                ` : `
+                  <div class="preserved-tag">✓ Preserved historical term (Never deleted)</div>
+                `}
               </div>
             `).join('')}
           </div>
         `}
       </div>
 
-      <div style="margin-bottom:24px">
-        <h4 style="font-size:14px;font-weight:750;margin-bottom:10px">Family Members (${fams.length})</h4>
-        ${fams.length === 0 ? '<div style="font-size:12.5px;color:var(--text-muted)">No family members registered</div>' : `
-          <div style="display:flex;flex-direction:column;gap:8px">
-            ${fams.map(f => `
-              <div style="padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:space-between">
-                <div>
+      <div class="drawer-section">
+        <div class="drawer-sec-head">
+          <h3>Family Members (${fam.length})</h3>
+        </div>
+        ${fam.length === 0 ? '<p class="empty-text">No family members registered.</p>' : `
+          <div class="mini-list">
+            ${fam.map(f => `
+              <div class="mini-card">
+                <div class="mini-head">
                   <strong>${esc(f.full_name)}</strong>
-                  <div style="font-size:11.5px;color:var(--text-muted)">${esc(f.relationship)} · DOB: ${fmtDate(f.date_of_birth)}</div>
+                  <span class="badge default">${esc(f.relationship)}</span>
                 </div>
-                <div style="font-size:12px;color:var(--text-muted)">${esc(f.mobile || '')}</div>
+                <div class="mini-sub">DOB: ${fmtDate(f.date_of_birth)} ${f.mobile ? '• ' + esc(f.mobile) : ''}</div>
               </div>
             `).join('')}
           </div>
         `}
       </div>
 
-      <div style="margin-bottom:24px">
-        <h4 style="font-size:14px;font-weight:750;margin-bottom:10px">Attached Document Metadata (${docs.length})</h4>
-        ${docs.length === 0 ? '<div style="font-size:12.5px;color:var(--text-muted)">No documents registered in vault</div>' : `
-          <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="drawer-section">
+        <div class="drawer-sec-head">
+          <h3>Attached Documents & Local Vault (${docs.length})</h3>
+          <button class="btn sm primary" data-modal="documentModal" data-prefill-customer="${esc(c.id)}">＋ Attach Document</button>
+        </div>
+        ${docs.length === 0 ? '<p class="empty-text">No documents registered for this customer.</p>' : `
+          <div class="mini-list">
             ${docs.map(d => `
-              <div style="padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:space-between">
-                <div>
+              <div class="mini-card">
+                <div class="mini-head">
                   <strong>${esc(d.title)}</strong>
-                  <div style="font-size:11.5px;color:var(--text-muted)">${esc(d.document_type)} · ${fmtFileSize(d.file_size)}</div>
+                  <span class="badge info">${esc(d.document_type)}</span>
                 </div>
-                <span class="badge blue">${esc(d.file_name)}</span>
+                <div class="mini-sub">${esc(d.file_name)} (${fmtFileSize(d.file_size)})</div>
+                <div class="vault-local-path">📁 Local Storage: ${esc(d.local_storage_path || 'Stored in device vault')}</div>
               </div>
             `).join('')}
           </div>
@@ -751,10 +1054,230 @@
       </div>
     `;
 
-    $('#customerDrawer').classList.add('open');
+    drawer.classList.add('open');
   }
 
-  // --- CSV / JSON Exporters ---
+  // 4. Policies Renderer
+  function renderPolicies() {
+    const tbody = $('#policiesTable tbody');
+    if (!tbody) return;
+
+    const query = ($('#policySearch')?.value || '').toLowerCase().trim();
+    const filter = state.policyFilter || 'all';
+
+    const filtered = state.policies.filter(p => {
+      if (filter === 'active' && (p.status || 'Active').toLowerCase() !== 'active') return false;
+      if (filter === 'renewed' && !['renewed', 'historical'].includes((p.status || '').toLowerCase())) return false;
+      if (filter === 'expired' && (p.status || '').toLowerCase() !== 'expired') return false;
+
+      if (!query) return true;
+      return (p.policy_number || '').toLowerCase().includes(query) ||
+             (p.customer_name || '').toLowerCase().includes(query) ||
+             (p.company_name || '').toLowerCase().includes(query) ||
+             (p.product_name || '').toLowerCase().includes(query);
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">No matching policies found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(p => {
+      const isHistorical = ['renewed', 'historical'].includes((p.status || '').toLowerCase());
+      return `
+        <tr class="${isHistorical ? 'historical-row' : ''}">
+          <td>
+            <strong>${esc(p.policy_number)}</strong>
+            ${p.previous_policy_id ? '<span class="badge default" title="Linked to previous term">Renewed Term</span>' : ''}
+          </td>
+          <td>
+            <a href="#" class="cust-link" data-view-customer="${esc(p.customer_id)}">${esc(p.customer_name || 'Client')}</a>
+          </td>
+          <td>
+            <div>${esc(p.product_name)}</div>
+            <div class="table-subtext">${esc(p.company_name)} ${p.category_name ? '• ' + esc(p.category_name) : ''}</div>
+          </td>
+          <td><strong>${fmtCurrency(p.premium_amount)}</strong></td>
+          <td>${fmtCurrency(p.sum_insured)}</td>
+          <td>
+            <div>${fmtDate(p.renewal_due_date)}</div>
+            <div class="table-subtext">Start: ${fmtDate(p.start_date)}</div>
+          </td>
+          <td>
+            <span class="badge status-${(p.status || 'Active').toLowerCase()}">${esc(p.status || 'Active')}</span>
+          </td>
+          <td class="action-cell">
+            ${!isHistorical ? `
+              <button class="btn sm secondary" data-renew-policy="${esc(p.id)}" title="Renew policy while preserving older term">
+                🔄 Renew
+              </button>
+            ` : `
+              <span class="preserved-tag">Preserved</span>
+            `}
+            <button class="icon-btn delete" data-delete-policy="${esc(p.id)}" title="Delete policy">🗑️</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // 5. Documents Renderer
+  function renderDocuments() {
+    const tbody = $('#documentsTable tbody');
+    if (!tbody) return;
+
+    const query = ($('#docSearch')?.value || '').toLowerCase().trim();
+    const filter = state.docFilter || 'all';
+
+    const filtered = state.documents.filter(d => {
+      if (filter !== 'all' && (d.document_type || '').toLowerCase() !== filter.toLowerCase()) return false;
+      if (!query) return true;
+      return (d.title || '').toLowerCase().includes(query) ||
+             (d.file_name || '').toLowerCase().includes(query) ||
+             (d.customer_name || '').toLowerCase().includes(query);
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No document metadata records registered.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(d => `
+      <tr>
+        <td>
+          <div class="doc-icon-cell">
+            <span class="doc-badge-icon">${d.document_type === 'PAN Card' ? '🪪' : (d.document_type === 'Birth Certificate' ? '📜' : '📄')}</span>
+            <div>
+              <strong>${esc(d.title)}</strong>
+              <div class="table-subtext">${esc(d.file_name)} • ${fmtFileSize(d.file_size)}</div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <span class="badge info">${esc(d.document_type)}</span>
+        </td>
+        <td>
+          <a href="#" class="cust-link" data-view-customer="${esc(d.customer_id)}">${esc(d.customer_name || 'Client')}</a>
+        </td>
+        <td>
+          <div class="vault-path-text">${esc(d.local_storage_path || 'Isolated Device Storage')}</div>
+          <div class="privacy-note">🔒 Binary stays local on device storage</div>
+        </td>
+        <td>${fmtDate(d.created_at)}</td>
+        <td class="action-cell">
+          <button class="icon-btn delete" data-delete-doc="${esc(d.id)}" title="Delete metadata record">🗑️</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  // 6. Appointments Renderer
+  function renderAppointments() {
+    const tbody = $('#appointmentsTable tbody');
+    if (!tbody) return;
+
+    if (state.appointments.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No appointments scheduled.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = state.appointments.map(a => `
+      <tr>
+        <td>
+          <strong>${fmtDate(a.date)}</strong>
+          <div class="table-subtext">${esc(a.time || 'All Day')}</div>
+        </td>
+        <td>
+          <a href="#" class="cust-link" data-view-customer="${esc(a.customer_id)}">${esc(a.customer_name || 'Client')}</a>
+        </td>
+        <td>
+          <div><strong>${esc(a.purpose)}</strong></div>
+          <div class="table-subtext">${esc(a.company_name || '')} ${a.product_name ? '• ' + esc(a.product_name) : ''}</div>
+        </td>
+        <td><span class="badge info">${esc(a.status || 'Scheduled')}</span></td>
+        <td>${esc(a.notes || '—')}</td>
+        <td class="action-cell">
+          <button class="icon-btn" data-edit-appointment="${esc(a.id)}">✏️</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  // 7. Reminders Renderer
+  function renderReminders() {
+    const tbody = $('#remindersTable tbody');
+    if (!tbody) return;
+
+    if (state.reminders.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No reminders found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = state.reminders.map(r => {
+      const isCompleted = (r.status || '').toLowerCase() === 'completed';
+      return `
+        <tr class="${isCompleted ? 'completed-row' : ''}">
+          <td>
+            <span class="badge default">${esc(r.type)}</span>
+          </td>
+          <td>
+            <strong>${esc(r.activity)}</strong>
+            ${r.notes ? `<div class="table-subtext">${esc(r.notes)}</div>` : ''}
+          </td>
+          <td>
+            <a href="#" class="cust-link" data-view-customer="${esc(r.customer_id)}">${esc(r.customer_name || 'Client')}</a>
+          </td>
+          <td>${fmtDate(r.due_at)}</td>
+          <td>
+            <span class="badge ${isCompleted ? 'success' : 'warning'}">${esc(r.status || 'Pending')}</span>
+          </td>
+          <td class="action-cell">
+            ${!isCompleted ? `
+              <button class="btn sm secondary" data-complete-reminder="${esc(r.id)}">✓ Done</button>
+            ` : `
+              <span class="table-subtext">Completed</span>
+            `}
+            <button class="icon-btn delete" data-delete-reminder="${esc(r.id)}">🗑️</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // 8. Raw Table Explorer
+  function renderRawExplorer() {
+    const select = $('#rawTableSelect');
+    const thead = $('#rawTableHeader');
+    const tbody = $('#rawTableBody');
+    const countBadge = $('#rawRowCount');
+    if (!select || !thead || !tbody) return;
+
+    const tableName = select.value;
+    const listKey = tableName === 'family_members' ? 'familyMembers' : tableName;
+    const records = state[listKey] || [];
+
+    if (countBadge) countBadge.textContent = `${records.length} records`;
+
+    if (records.length === 0) {
+      thead.innerHTML = '<tr><th>Status</th></tr>';
+      tbody.innerHTML = '<tr><td class="empty-cell">Table is currently empty in local storage cache.</td></tr>';
+      return;
+    }
+
+    const columns = Object.keys(records[0]);
+    thead.innerHTML = `<tr>${columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
+    tbody.innerHTML = records.map(row => `
+      <tr>
+        ${columns.map(c => {
+          let val = row[c];
+          if (typeof val === 'object' && val !== null) val = JSON.stringify(val);
+          return `<td>${esc(val ?? '—')}</td>`;
+        }).join('')}
+      </tr>
+    `).join('');
+  }
+
+  // --- Export Utilities ---
   function downloadFile(filename, content, type = 'text/plain') {
     const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
@@ -763,20 +1286,21 @@
     a.download = filename;
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 500);
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
-  function exportTableToCsv(rows, filename) {
+  function exportTableToCsv(rows, filename = 'export.csv') {
     if (!rows || rows.length === 0) return toast('No data to export', 'error');
     const headers = Object.keys(rows[0]);
+    const escapeCsv = v => {
+      if (v === null || v === undefined) return '';
+      const str = String(v).replace(/"/g, '""');
+      return str.includes(',') || str.includes('\n') || str.includes('"') ? `"${str}"` : str;
+    };
     const lines = [
       headers.join(','),
-      ...rows.map(r => headers.map(h => {
-        let val = r[h] ?? '';
-        if (typeof val === 'object') val = JSON.stringify(val);
-        val = String(val).replace(/"/g, '""');
-        return `"${val}"`;
-      }).join(','))
+      ...rows.map(row => headers.map(h => escapeCsv(row[h])).join(','))
     ];
     downloadFile(filename, lines.join('\n'), 'text/csv');
     toast(`Exported ${filename} successfully`);
@@ -801,11 +1325,11 @@
       };
 
       try {
-        await Supabase.upsert('customers', data);
+        await DataStore.upsert('customers', data);
         closeModal('customerModal');
         form.reset();
-        await fetchCloudData(true);
-        toast(`Customer "${data.name}" saved to Supabase cloud database ✓`, 'success');
+        const modeNotice = isSandboxMode() ? 'saved in Local Sandbox ✓' : 'saved to Supabase ✓';
+        toast(`Customer "${data.name}" ${modeNotice}`, 'success');
       } catch (err) {
         toast(`Save failed: ${err.message}`, 'error');
       }
@@ -835,17 +1359,17 @@
       };
 
       try {
-        await Supabase.upsert('policies', data);
+        await DataStore.upsert('policies', data);
         closeModal('policyModal');
         form.reset();
-        await fetchCloudData(true);
-        toast(`Policy "${data.product_name}" saved to Supabase ✓`, 'success');
+        const modeNotice = isSandboxMode() ? 'saved in Local Sandbox ✓' : 'saved to Supabase ✓';
+        toast(`Policy "${data.product_name}" ${modeNotice}`, 'success');
       } catch (err) {
         toast(`Save policy failed: ${err.message}`, 'error');
       }
     });
 
-    // 3. Renew Policy Form (Policy Preservation)
+    // 3. Renew Policy Form (Policy Preservation: older term is kept permanently)
     $('#renewForm')?.addEventListener('submit', async e => {
       e.preventDefault();
       const form = e.target;
@@ -854,8 +1378,8 @@
       if (!oldPol) return toast('Old policy not found', 'error');
 
       try {
-        // 1. Preserve the old policy term: update status to 'Renewed' in Supabase
-        await Supabase.upsert('policies', {
+        // 1. Preserve the old policy term: update status to 'Renewed'
+        await DataStore.upsert('policies', {
           ...oldPol,
           status: 'Renewed',
           updated_at: new Date().toISOString()
@@ -881,11 +1405,10 @@
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
-        await Supabase.upsert('policies', newPolicy);
+        await DataStore.upsert('policies', newPolicy);
 
         closeModal('renewModal');
         form.reset();
-        await fetchCloudData(true);
         toast('Policy renewed! Previous term safely preserved as "Renewed" ✓', 'success');
       } catch (err) {
         toast(`Renewal failed: ${err.message}`, 'error');
@@ -908,16 +1431,17 @@
         file_name: form.file_name.value.trim(),
         file_size: Number(form.file_size.value || 0),
         mime_type: form.file_name.value.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+        local_storage_path: `/storage/emulated/0/InsureClub/documents/${form.file_name.value.trim()}`,
+        notes: 'File stored in local device vault. Metadata synced to database.',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
 
       try {
-        await Supabase.upsert('documents', data);
+        await DataStore.upsert('documents', data);
         closeModal('documentModal');
         form.reset();
-        await fetchCloudData(true);
-        toast(`${data.document_type} metadata registered in Supabase ✓`, 'success');
+        toast(`${data.document_type} metadata registered successfully ✓`, 'success');
       } catch (err) {
         toast(`Document registration failed: ${err.message}`, 'error');
       }
@@ -944,27 +1468,60 @@
       };
 
       try {
-        await Supabase.upsert('appointments', data);
+        await DataStore.upsert('appointments', data);
         closeModal('appointmentModal');
         form.reset();
-        await fetchCloudData(true);
-        toast('Appointment scheduled in Supabase ✓', 'success');
+        toast('Appointment scheduled successfully ✓', 'success');
       } catch (err) {
         toast(`Appointment scheduling failed: ${err.message}`, 'error');
       }
     });
 
-    // 6. Settings Form
-    $('#settingsForm')?.addEventListener('submit', e => {
+    // 6. Settings Form: Save & Connect
+    $('#settingsForm')?.addEventListener('submit', async e => {
       e.preventDefault();
-      state.supabase.url = ($('#cfgSupabaseUrl').value || '').trim() || DEFAULT_SUPABASE.url;
-      state.supabase.anonKey = ($('#cfgSupabaseKey').value || '').trim() || DEFAULT_SUPABASE.anonKey;
+      const rawUrl = ($('#cfgSupabaseUrl').value || '').trim();
+      const rawKey = ($('#cfgSupabaseKey').value || '').trim();
+
+      if (!rawUrl || isPlaceholderUrl(rawUrl)) {
+        state.supabase.url = DEFAULT_SUPABASE.url;
+        state.supabase.anonKey = DEFAULT_SUPABASE.anonKey;
+        persistState();
+        setConnectionStatus('sandbox');
+        initRealtime();
+        DataStore.fetchAll(true);
+        toast('Switched to Local Sandbox Mode ✓', 'info');
+        return;
+      }
+
+      state.supabase.url = rawUrl;
+      state.supabase.anonKey = rawKey;
       persistState();
-      toast('Supabase configuration saved locally ✓', 'success');
+      toast('Supabase credentials saved. Connecting to cloud…', 'info');
       initRealtime();
-      fetchCloudData();
+      await fetchCloudData(false);
     });
 
+    // 7. Copy SQL Schema
+    $('#copySchemaBtn')?.addEventListener('click', async () => {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = SUPABASE_SCHEMA_SQL;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        toast('SQL Schema copied to clipboard! Paste into Supabase SQL Editor ✓', 'success');
+      } catch (err) {
+        toast('Could not auto-copy schema. You can find schema.sql in supabase/ folder.', 'error');
+      }
+    });
+
+    // 8. Test Connection
     $('#testConnBtn')?.addEventListener('click', async () => {
       const url = ($('#cfgSupabaseUrl').value || '').trim() || state.supabase.url;
       const key = ($('#cfgSupabaseKey').value || '').trim() || state.supabase.anonKey;
@@ -972,22 +1529,78 @@
       resultBox.classList.remove('hidden', 'success', 'error');
       resultBox.textContent = 'Testing connection to Supabase cloud…';
 
+      if (isPlaceholderUrl(url)) {
+        resultBox.classList.add('error');
+        resultBox.innerHTML = '<strong>Local Sandbox URL Detected:</strong><br>The default domain <code>insureclub-sync.supabase.co</code> is a sandbox placeholder for local offline testing.<br><br>To connect a live cloud database, enter your real Supabase Project URL (e.g. <code>https://your-ref.supabase.co</code>) and public anon key.';
+        toast('Default URL is a sandbox placeholder', 'info');
+        return;
+      }
+
       try {
         const res = await Supabase.ping(url, key);
         resultBox.classList.add('success');
-        resultBox.innerHTML = `<strong>✓ Connection Verified!</strong><br>Successfully reached Supabase cloud in <strong>${res.latency} ms</strong>. Table access and REST endpoints are active.`;
+        resultBox.innerHTML = `<strong>✓ Connection Verified!</strong><br>Successfully reached Supabase cloud in <strong>${res.latency} ms</strong>. Table access and REST endpoints are active and ready.`;
         toast('Connection verified ✓', 'success');
       } catch (err) {
         resultBox.classList.add('error');
-        resultBox.innerHTML = `<strong>✕ Connection Failed:</strong><br>${esc(err.message)}`;
-        toast('Connection test failed', 'error');
+        const friendly = sanitizeNetworkError(err);
+        resultBox.innerHTML = `<strong>✕ Connection Notice:</strong><br>${esc(friendly)}<br><small style="color:var(--text-muted);margin-top:6px;display:block">Technical error: ${esc(err.message)}</small>`;
+        toast('Connection test notice', 'error');
       }
     });
 
+    // 9. Push Sandbox Data to Cloud
+    $('#pushToCloudBtn')?.addEventListener('click', async () => {
+      if (isSandboxMode()) {
+        toast('Please enter your live Supabase URL and click "Save & Connect" first before pushing data.', 'error');
+        return;
+      }
+
+      const totalItems = state.customers.length + state.policies.length + state.documents.length;
+      if (totalItems === 0) {
+        toast('No local records to push', 'info');
+        return;
+      }
+
+      if (!confirm(`Push ${state.customers.length} customers, ${state.policies.length} policies, and ${state.documents.length} document records to your live Supabase cloud database?`)) {
+        return;
+      }
+
+      const btn = $('#pushToCloudBtn');
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Pushing data…';
+
+      try {
+        if (state.customers.length) await Supabase.upsert('customers', state.customers);
+        if (state.policies.length) await Supabase.upsert('policies', state.policies);
+        if (state.familyMembers.length) await Supabase.upsert('family_members', state.familyMembers);
+        if (state.documents.length) await Supabase.upsert('documents', state.documents);
+        if (state.appointments.length) await Supabase.upsert('appointments', state.appointments);
+        if (state.reminders.length) await Supabase.upsert('reminders', state.reminders);
+
+        toast(`Pushed ${totalItems} records to Supabase cloud database! ✓`, 'success');
+        await fetchCloudData(true);
+      } catch (err) {
+        toast(`Push notice: ${sanitizeNetworkError(err)}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    });
+
+    // 10. Reset to Local Sandbox Defaults
     $('#resetDefaultsBtn')?.addEventListener('click', () => {
       $('#cfgSupabaseUrl').value = DEFAULT_SUPABASE.url;
       $('#cfgSupabaseKey').value = DEFAULT_SUPABASE.anonKey;
-      toast('Reset to default InsureClub Supabase credentials');
+      state.supabase.url = DEFAULT_SUPABASE.url;
+      state.supabase.anonKey = DEFAULT_SUPABASE.anonKey;
+      persistState();
+      seedSampleDataIfNeeded();
+      setConnectionStatus('sandbox');
+      initRealtime();
+      renderAll();
+      toast('Switched to Local Sandbox Mode ✓', 'success');
     });
   }
 
@@ -1047,11 +1660,10 @@
       // Delete Customer
       if (t.dataset.deleteCustomer) {
         const c = state.customers.find(x => x.id === t.dataset.deleteCustomer);
-        if (c && confirm(`Delete customer "${c.name}" from the cloud database? Linked policies and documents will also be removed.`)) {
+        if (c && confirm(`Delete customer "${c.name}"? Linked policies and documents will also be removed.`)) {
           try {
-            await Supabase.remove('customers', c.id);
-            await fetchCloudData(true);
-            toast(`Customer "${c.name}" deleted from cloud`, 'info');
+            await DataStore.remove('customers', c.id);
+            toast(`Customer "${c.name}" deleted`, 'info');
           } catch (err) {
             toast(`Delete failed: ${err.message}`, 'error');
           }
@@ -1082,8 +1694,7 @@
         const p = state.policies.find(x => x.id === t.dataset.deletePolicy);
         if (p && confirm(`Delete policy "${p.policy_number}"?`)) {
           try {
-            await Supabase.remove('policies', p.id);
-            await fetchCloudData(true);
+            await DataStore.remove('policies', p.id);
             toast(`Policy "${p.policy_number}" deleted`, 'info');
           } catch (err) {
             toast(`Delete failed: ${err.message}`, 'error');
@@ -1096,8 +1707,7 @@
         const d = state.documents.find(x => x.id === t.dataset.deleteDoc);
         if (d && confirm(`Delete document record "${d.title}"?`)) {
           try {
-            await Supabase.remove('documents', d.id);
-            await fetchCloudData(true);
+            await DataStore.remove('documents', d.id);
             toast(`Document record "${d.title}" deleted`, 'info');
           } catch (err) {
             toast(`Delete failed: ${err.message}`, 'error');
@@ -1110,12 +1720,11 @@
         const r = state.reminders.find(x => x.id === t.dataset.completeReminder);
         if (r) {
           try {
-            await Supabase.upsert('reminders', {
+            await DataStore.upsert('reminders', {
               ...r,
               status: 'Completed',
               completed_at: new Date().toISOString()
             });
-            await fetchCloudData(true);
             toast('Reminder marked completed ✓', 'success');
           } catch (err) {
             toast(`Failed to update reminder: ${err.message}`, 'error');
@@ -1128,8 +1737,7 @@
         const r = state.reminders.find(x => x.id === t.dataset.deleteReminder);
         if (r && confirm(`Delete reminder "${r.activity}"?`)) {
           try {
-            await Supabase.remove('reminders', r.id);
-            await fetchCloudData(true);
+            await DataStore.remove('reminders', r.id);
             toast('Reminder deleted', 'info');
           } catch (err) {
             toast(`Delete failed: ${err.message}`, 'error');
@@ -1167,8 +1775,8 @@
       $('#sidebar').classList.toggle('open');
     });
 
-    // Refresh Cloud Data
-    $('#refreshCloudBtn')?.addEventListener('click', () => fetchCloudData(false));
+    // Refresh Data (Sandbox vs Live)
+    $('#refreshCloudBtn')?.addEventListener('click', () => DataStore.fetchAll(false));
 
     // Search inputs
     $('#customerSearch')?.addEventListener('input', renderCustomers);
@@ -1206,13 +1814,17 @@
     if ($('#cfgSupabaseUrl')) $('#cfgSupabaseUrl').value = state.supabase.url;
     if ($('#cfgSupabaseKey')) $('#cfgSupabaseKey').value = state.supabase.anonKey;
 
+    seedSampleDataIfNeeded();
     setupForms();
     setupEventDelegation();
     renderAll();
 
-    // Start Realtime WebSocket & Fetch Cloud Data
-    initRealtime();
-    fetchCloudData(true);
+    if (isSandboxMode()) {
+      setConnectionStatus('sandbox');
+    } else {
+      initRealtime();
+      DataStore.fetchAll(true);
+    }
   }
 
   if (document.readyState === 'loading') {

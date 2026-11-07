@@ -22,9 +22,9 @@
       </div>
 
       <div class="nav-controls">
-        <div id="connectionPill" class="status-pill connected" title="Supabase Cloud Connection">
+        <div id="connectionPill" class="status-pill sandbox" title="Local Sandbox Mode — Click to configure Supabase" data-nav="settings" style="cursor:pointer">
           <span class="status-dot"></span>
-          <span id="connectionText">Supabase Connected</span>
+          <span id="connectionText">Local Sandbox Mode</span>
         </div>
 
         <button id="refreshCloudBtn" class="action-btn secondary" title="Fetch latest data from Supabase">
@@ -113,6 +113,19 @@
               <button class="btn secondary" id="exportFullJson">Export JSON</button>
               <button class="btn primary" data-modal="customerModal">＋ Add Customer</button>
             </div>
+          </div>
+
+          <!-- Sandbox Mode Banner -->
+          <div class="sandbox-banner" id="sandboxBanner" style="display:none">
+            <div class="sandbox-banner-icon">⚡</div>
+            <div class="sandbox-banner-content">
+              <div class="sandbox-banner-title">Local Sandbox Mode Active (Ready to Use Offline)</div>
+              <div class="sandbox-banner-text">
+                Pre-seeded with sample clients, policies (including preserved historical terms), document vault records, and reminders. All modifications are stored locally in your browser.
+                To sync across devices with your own free Supabase PostgreSQL database, connect your project in Settings.
+              </div>
+            </div>
+            <button class="btn primary sm" data-nav="settings">Connect Supabase</button>
           </div>
 
           <!-- KPI Metrics Grid -->
@@ -500,13 +513,42 @@
           </div>
 
           <div class="settings-card">
-            <h3>Cloud Project Configuration</h3>
-            <p class="settings-desc">Pre-configured with default credentials so this portal works right out of the box.</p>
+            <h3>Cloud Connection &amp; Mode</h3>
+            <p class="settings-desc">InsureClub operates in <strong>Local Sandbox Mode</strong> (zero network setup, saved in browser) or connects directly to your live <strong>Supabase PostgreSQL</strong> cloud instance.</p>
+
+            <div class="setup-steps-list">
+              <div class="setup-step-item">
+                <div class="setup-step-num">1</div>
+                <div class="setup-step-body">
+                  <div class="setup-step-title">Create Free Supabase Project</div>
+                  <div class="setup-step-desc">Visit <a href="https://supabase.com" target="_blank" rel="noopener" style="color:var(--primary);text-decoration:underline">supabase.com</a> and create a free project (ready in under 60 seconds).</div>
+                </div>
+              </div>
+
+              <div class="setup-step-item">
+                <div class="setup-step-num">2</div>
+                <div class="setup-step-body">
+                  <div class="setup-step-title">Execute InsureClub Schema in SQL Editor</div>
+                  <div class="setup-step-desc">Open the Supabase SQL Editor and run our pre-built schema to create all tables (customers, policies, family, documents, appointments, reminders) and RLS security policies.</div>
+                  <div style="margin-top:8px">
+                    <button type="button" class="btn secondary sm" id="copySchemaBtn">📋 Copy Complete SQL Schema (schema.sql)</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="setup-step-item">
+                <div class="setup-step-num">3</div>
+                <div class="setup-step-body">
+                  <div class="setup-step-title">Connect &amp; Push Data</div>
+                  <div class="setup-step-desc">Paste your Project URL &amp; Public Anon Key below, click Test Connection, and optionally push all current sandbox clients and policies straight into your live database.</div>
+                </div>
+              </div>
+            </div>
 
             <form id="settingsForm">
               <div class="form-group">
                 <label for="cfgSupabaseUrl">Supabase Project URL</label>
-                <input type="url" id="cfgSupabaseUrl" class="form-input" required placeholder="https://xyz.supabase.co">
+                <input type="url" id="cfgSupabaseUrl" class="form-input" required placeholder="https://your-project-id.supabase.co">
               </div>
 
               <div class="form-group">
@@ -514,10 +556,11 @@
                 <input type="text" id="cfgSupabaseKey" class="form-input" required placeholder="eyJhbGciOi...">
               </div>
 
-              <div class="form-row" style="margin-top:16px">
-                <button type="submit" class="btn primary">Save Configuration</button>
+              <div class="form-row" style="margin-top:16px; flex-wrap:wrap; gap:8px">
+                <button type="submit" class="btn primary">Save &amp; Connect</button>
                 <button type="button" class="btn secondary" id="testConnBtn">Test Connection</button>
-                <button type="button" class="btn secondary" id="resetDefaultsBtn">Reset to Default</button>
+                <button type="button" class="btn secondary" id="pushToCloudBtn">🚀 Push Sandbox Data to Cloud</button>
+                <button type="button" class="btn secondary" id="resetDefaultsBtn">Switch to Local Sandbox</button>
               </div>
             </form>
 
