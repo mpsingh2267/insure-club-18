@@ -148,6 +148,8 @@ async function runDailyAutomation() {
   };
 }
 
+const supabase = require('./supabase');
+
 function startScheduler() {
   cron.schedule('0 8 * * *', async () => {
     try {
@@ -155,6 +157,19 @@ function startScheduler() {
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Automation scheduler failed:', error.message);
+    }
+  });
+
+  // Background periodic auto-sync with Supabase
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      if (supabase.isConfigured()) {
+        const { all, get, run } = require('./db');
+        await supabase.syncToSupabase({ all, get, run });
+      }
+    } catch (error) {
+      // Periodic background auto-sync failure is logged gracefully without throwing
+      console.warn('Supabase periodic auto-sync notice:', error.message);
     }
   });
 }

@@ -1,4 +1,4 @@
 8a4e7f29fb445159cb9560d8b7afa61c3f7098d6fe290b5b5ff0da09852a70c4  InsureClub-Premium-v1.0.apk
 828b4c17cd49c761f19318deca4de9a9e6364c84026b971f1920934ce1f1b8ed  InsureClub-Premium-v2.0.apk
 e8ceb2bfbe09c651e9c978e576cdc811c619a24870db6cb78a7a7e992ba2c9d0  InsureClub-Premium-v2.1.apk
-8e74bd2a0d97dff5e803d0b00e3351d64923d5a8fee024ca9594a6fddb5a5d13  InsureClub-Premium-v2.2.apk
+240ca7c542a0b5d5ce893c130cda8b359f1c478eb64aab5ea428f2dab504d03a  InsureClub-Premium-v2.2.apk

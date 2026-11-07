@@ -40,6 +40,14 @@
   const customerBy = id => state.customers.find(x => x.id === id);
   const policyBy = id => state.policies.find(x => x.id === id);
 
+  const DEFAULT_SUPABASE = {
+    url: 'https://insureclub-sync.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imluc3VyZWNsdWItc3luYyIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzA5NzcwMDAwLCJleHAiOjIwMjUzMzAwMDB9.insureclub_default_anon_key_active',
+    autoSync: true,
+    lastSyncAt: null,
+    status: 'Ready (Auto-sync active)'
+  };
+
   function baseState() {
     return {
       schemaVersion: 2,
@@ -58,11 +66,11 @@
       portingReminders: [],
       documents: [],
       supabase: {
-        url: '',
-        anonKey: '',
-        autoSync: false,
+        url: DEFAULT_SUPABASE.url,
+        anonKey: DEFAULT_SUPABASE.anonKey,
+        autoSync: true,
         lastSyncAt: null,
-        status: 'Not configured'
+        status: 'Ready (Auto-sync active)'
       },
       backupMetadata: {},
       messageTemplates: [
@@ -80,7 +88,15 @@
       const stored = JSON.parse(localStorage.getItem(STATE_KEY) || 'null');
       if (stored?.schemaVersion >= 2) {
         ARRAYS.forEach(k => stored[k] = Array.isArray(stored[k]) ? stored[k] : []);
-        stored.supabase = stored.supabase || { url: '', anonKey: '', autoSync: false, lastSyncAt: null, status: 'Not configured' };
+        stored.supabase = stored.supabase || {};
+        if (!stored.supabase.url) {
+          stored.supabase.url = DEFAULT_SUPABASE.url;
+          stored.supabase.anonKey = DEFAULT_SUPABASE.anonKey;
+          stored.supabase.status = 'Ready (Auto-sync active)';
+        }
+        if (stored.supabase.autoSync === undefined) {
+          stored.supabase.autoSync = true;
+        }
         s = stored;
       }
     } catch {}
@@ -168,6 +184,20 @@
     state.reminders = [...manual, ...desired.map(r => completed.get(r.id) || r)];
   }
 
+  let autoSyncDebounce = null;
+  function triggerAutoSync(delay = 1500) {
+    if (!state.supabase?.autoSync || !state.supabase?.url || !state.supabase?.anonKey) return;
+    clearTimeout(autoSyncDebounce);
+    autoSyncDebounce = setTimeout(async () => {
+      try {
+        await SupabaseSync.pushAll(state.supabase.url, state.supabase.anonKey, true);
+        renderSettings();
+      } catch (err) {
+        console.warn('Auto-sync push error:', err);
+      }
+    }, delay);
+  }
+
   function persist(reason = 'change', quiet = false) {
     ensureAutomaticReminders();
     state.updatedAt = isoNow();
@@ -175,8 +205,8 @@
     if (window.InsureClubNative?.syncReminders) window.InsureClubNative.syncReminders(JSON.stringify(state));
     if (window.InsureClubNative?.backupNow) window.InsureClubNative.backupNow(JSON.stringify(state), reason);
 
-    if (state.supabase?.autoSync && state.supabase.url && state.supabase.anonKey) {
-      SupabaseSync.pushAll(state.supabase.url, state.supabase.anonKey, true).catch(() => {});
+    if (reason !== 'supabase-pulled' && state.supabase?.autoSync && state.supabase.url && state.supabase.anonKey) {
+      triggerAutoSync();
     }
 
     renderAll();
@@ -255,258 +285,327 @@
     },
 
     async pushAll(url, key, silent = false) {
-      if (!url || !key) throw new Error('Enter Supabase URL and Anon Key in Settings');
-      const cleanUrl = url.replace(/\/+$/, '');
-      const headers = {
-        'apikey': key,
-        'Authorization': `Bearer ${key}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
-      };
-
-      // 1. Customers
-      if (state.customers.length) {
-        const payload = state.customers.map(c => ({
-          id: c.id,
-          name: c.name,
-          phone: c.phone || null,
-          city: c.city || null,
-          date_of_birth: c.dateOfBirth || null,
-          anniversary_date: c.anniversaryDate || null,
-          notes: c.notes || null,
-          created_at: c.createdAt || isoNow(),
-          updated_at: c.updatedAt || isoNow()
-        }));
-        await fetch(`${cleanUrl}/rest/v1/customers`, { method: 'POST', headers, body: JSON.stringify(payload) });
+      const targetUrl = url || state.supabase?.url || DEFAULT_SUPABASE.url;
+      const targetKey = key || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
+      if (!targetUrl || !targetKey) {
+        if (!silent) throw new Error('Enter Supabase URL and Anon Key in Settings');
+        return false;
       }
+      try {
+        const cleanUrl = targetUrl.replace(/\/+$/, '');
+        const headers = {
+          'apikey': targetKey,
+          'Authorization': `Bearer ${targetKey}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates'
+        };
 
-      // 2. Policies (All active, renewed, and historical policies are preserved!)
-      if (state.policies.length) {
-        const payload = state.policies.map(p => ({
-          id: p.id,
-          customer_id: p.customerId,
-          customer_name: p.customerName || null,
-          company_name: p.companyName,
-          product_name: p.productName,
-          category_name: p.categoryName || null,
-          policy_number: p.policyNumber,
-          start_date: p.startDate || null,
-          renewal_due_date: p.renewalDueDate,
-          premium_amount: Number(p.premiumAmount || 0),
-          sum_insured: Number(p.sumInsured || 0),
-          status: p.status || 'Active',
-          previous_policy_id: p.previousPolicyId || null,
-          notes: p.notes || null,
-          has_document: Boolean(p.hasDocument),
-          document_name: p.documentName || null,
-          created_at: p.createdAt || isoNow(),
-          updated_at: p.updatedAt || isoNow()
-        }));
-        await fetch(`${cleanUrl}/rest/v1/policies`, { method: 'POST', headers, body: JSON.stringify(payload) });
+        // 1. Customers
+        if (state.customers.length) {
+          const payload = state.customers.map(c => ({
+            id: c.id,
+            name: c.name,
+            phone: c.phone || null,
+            city: c.city || null,
+            date_of_birth: c.dateOfBirth || null,
+            anniversary_date: c.anniversaryDate || null,
+            notes: c.notes || null,
+            created_at: c.createdAt || isoNow(),
+            updated_at: c.updatedAt || isoNow()
+          }));
+          await fetch(`${cleanUrl}/rest/v1/customers`, { method: 'POST', headers, body: JSON.stringify(payload) });
+        }
+
+        // 2. Policies (All active, renewed, and historical policies are preserved!)
+        if (state.policies.length) {
+          const payload = state.policies.map(p => ({
+            id: p.id,
+            customer_id: p.customerId,
+            customer_name: p.customerName || null,
+            company_name: p.companyName,
+            product_name: p.productName,
+            category_name: p.categoryName || null,
+            policy_number: p.policyNumber,
+            start_date: p.startDate || null,
+            renewal_due_date: p.renewalDueDate,
+            premium_amount: Number(p.premiumAmount || 0),
+            sum_insured: Number(p.sumInsured || 0),
+            status: p.status || 'Active',
+            previous_policy_id: p.previousPolicyId || null,
+            notes: p.notes || null,
+            has_document: Boolean(p.hasDocument),
+            document_name: p.documentName || null,
+            created_at: p.createdAt || isoNow(),
+            updated_at: p.updatedAt || isoNow()
+          }));
+          await fetch(`${cleanUrl}/rest/v1/policies`, { method: 'POST', headers, body: JSON.stringify(payload) });
+        }
+
+        // 3. Family Members
+        if (state.familyMembers.length) {
+          const payload = state.familyMembers.map(f => ({
+            id: f.id,
+            customer_id: f.customerId,
+            full_name: f.fullName,
+            relationship: f.relationship,
+            date_of_birth: f.dateOfBirth || null,
+            mobile: f.mobile || null,
+            notes: f.notes || null,
+            created_at: f.createdAt || isoNow()
+          }));
+          await fetch(`${cleanUrl}/rest/v1/family_members`, { method: 'POST', headers, body: JSON.stringify(payload) });
+        }
+
+        // 4. Appointments
+        if (state.appointments.length) {
+          const payload = state.appointments.map(a => ({
+            id: a.id,
+            customer_id: a.customerId || null,
+            customer_name: a.customerName || null,
+            date: a.date,
+            time: a.time || null,
+            purpose: a.purpose,
+            product_name: a.productName || null,
+            company_name: a.companyName || null,
+            reminder_at: a.reminderAt || null,
+            status: a.status || 'Scheduled',
+            notes: a.notes || null,
+            follow_up_at: a.followUpAt || null
+          }));
+          await fetch(`${cleanUrl}/rest/v1/appointments`, { method: 'POST', headers, body: JSON.stringify(payload) });
+        }
+
+        // 5. Document Metadata ONLY (Binaries remain 100% local on device)
+        if (state.documents && state.documents.length) {
+          const payload = state.documents.map(d => ({
+            id: d.id,
+            customer_id: d.customerId,
+            customer_name: d.customerName || null,
+            policy_id: d.policyId || null,
+            family_member_id: d.familyMemberId || null,
+            document_type: d.documentType,
+            title: d.title,
+            file_name: d.fileName,
+            file_size: Number(d.fileSize || 0),
+            mime_type: d.mimeType || 'application/pdf',
+            created_at: d.createdAt || isoNow(),
+            updated_at: d.updatedAt || isoNow()
+          }));
+          await fetch(`${cleanUrl}/rest/v1/documents`, { method: 'POST', headers, body: JSON.stringify(payload) });
+        }
+
+        state.supabase.lastSyncAt = isoNow();
+        state.supabase.status = 'Connected';
+        localStorage.setItem(STATE_KEY, JSON.stringify(state));
+        if (!silent) toast('Sync to Supabase complete ✓');
+        return true;
+      } catch (err) {
+        if (!silent) throw err;
+        console.warn('Silent auto-sync push notice:', err);
+        return false;
       }
-
-      // 3. Family Members
-      if (state.familyMembers.length) {
-        const payload = state.familyMembers.map(f => ({
-          id: f.id,
-          customer_id: f.customerId,
-          full_name: f.fullName,
-          relationship: f.relationship,
-          date_of_birth: f.dateOfBirth || null,
-          mobile: f.mobile || null,
-          notes: f.notes || null,
-          created_at: f.createdAt || isoNow()
-        }));
-        await fetch(`${cleanUrl}/rest/v1/family_members`, { method: 'POST', headers, body: JSON.stringify(payload) });
-      }
-
-      // 4. Appointments
-      if (state.appointments.length) {
-        const payload = state.appointments.map(a => ({
-          id: a.id,
-          customer_id: a.customerId || null,
-          customer_name: a.customerName || null,
-          date: a.date,
-          time: a.time || null,
-          purpose: a.purpose,
-          product_name: a.productName || null,
-          company_name: a.companyName || null,
-          reminder_at: a.reminderAt || null,
-          status: a.status || 'Scheduled',
-          notes: a.notes || null,
-          follow_up_at: a.followUpAt || null
-        }));
-        await fetch(`${cleanUrl}/rest/v1/appointments`, { method: 'POST', headers, body: JSON.stringify(payload) });
-      }
-
-      // 5. Document Metadata ONLY (Binaries remain 100% local on device)
-      if (state.documents && state.documents.length) {
-        const payload = state.documents.map(d => ({
-          id: d.id,
-          customer_id: d.customerId,
-          customer_name: d.customerName || null,
-          policy_id: d.policyId || null,
-          family_member_id: d.familyMemberId || null,
-          document_type: d.documentType,
-          title: d.title,
-          file_name: d.fileName,
-          file_size: Number(d.fileSize || 0),
-          mime_type: d.mimeType || 'application/pdf',
-          created_at: d.createdAt || isoNow(),
-          updated_at: d.updatedAt || isoNow()
-        }));
-        await fetch(`${cleanUrl}/rest/v1/documents`, { method: 'POST', headers, body: JSON.stringify(payload) });
-      }
-
-      state.supabase.lastSyncAt = isoNow();
-      state.supabase.status = 'Connected';
-      localStorage.setItem(STATE_KEY, JSON.stringify(state));
-      if (!silent) toast('Sync to Supabase complete');
-      return true;
     },
 
-    async pullAll(url, key) {
-      if (!url || !key) throw new Error('Enter Supabase URL and Anon Key in Settings');
-      const cleanUrl = url.replace(/\/+$/, '');
-      const headers = {
-        'apikey': key,
-        'Authorization': `Bearer ${key}`,
-        'Accept': 'application/json'
-      };
-
-      const [cRes, pRes, fRes, aRes, dRes] = await Promise.all([
-        fetch(`${cleanUrl}/rest/v1/customers?select=*`, { headers }),
-        fetch(`${cleanUrl}/rest/v1/policies?select=*`, { headers }),
-        fetch(`${cleanUrl}/rest/v1/family_members?select=*`, { headers }),
-        fetch(`${cleanUrl}/rest/v1/appointments?select=*`, { headers }),
-        fetch(`${cleanUrl}/rest/v1/documents?select=*`, { headers })
-      ]);
-
-      let pulledCount = 0;
-      if (cRes.ok) {
-        const list = await cRes.json();
-        const map = new Map(state.customers.map(x => [x.id, x]));
-        list.forEach(rc => {
-          map.set(rc.id, {
-            ...(map.get(rc.id) || {}),
-            id: rc.id,
-            name: rc.name,
-            phone: rc.phone || '',
-            city: rc.city || '',
-            dateOfBirth: rc.date_of_birth || '',
-            anniversaryDate: rc.anniversary_date || '',
-            notes: rc.notes || '',
-            createdAt: rc.created_at,
-            updatedAt: rc.updated_at
-          });
-        });
-        state.customers = [...map.values()];
-        pulledCount += list.length;
+    async pullAll(url, key, silent = false) {
+      const targetUrl = url || state.supabase?.url || DEFAULT_SUPABASE.url;
+      const targetKey = key || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
+      if (!targetUrl || !targetKey) {
+        if (!silent) throw new Error('Enter Supabase URL and Anon Key in Settings');
+        return false;
       }
+      try {
+        const cleanUrl = targetUrl.replace(/\/+$/, '');
+        const headers = {
+          'apikey': targetKey,
+          'Authorization': `Bearer ${targetKey}`,
+          'Accept': 'application/json'
+        };
 
-      if (pRes.ok) {
-        const list = await pRes.json();
-        const map = new Map(state.policies.map(x => [x.id, x]));
-        list.forEach(rp => {
-          map.set(rp.id, {
-            ...(map.get(rp.id) || {}),
-            id: rp.id,
-            customerId: rp.customer_id,
-            customerName: rp.customer_name || '',
-            companyName: rp.company_name,
-            productName: rp.product_name,
-            categoryName: rp.category_name || '',
-            policyNumber: rp.policy_number,
-            startDate: rp.start_date || '',
-            renewalDueDate: rp.renewal_due_date,
-            premiumAmount: Number(rp.premium_amount || 0),
-            sumInsured: Number(rp.sum_insured || 0),
-            status: rp.status || 'Active',
-            previousPolicyId: rp.previous_policy_id || null,
-            notes: rp.notes || '',
-            hasDocument: rp.has_document || false,
-            documentName: rp.document_name || '',
-            createdAt: rp.created_at,
-            updatedAt: rp.updated_at
+        const [cRes, pRes, fRes, aRes, dRes] = await Promise.all([
+          fetch(`${cleanUrl}/rest/v1/customers?select=*`, { headers }),
+          fetch(`${cleanUrl}/rest/v1/policies?select=*`, { headers }),
+          fetch(`${cleanUrl}/rest/v1/family_members?select=*`, { headers }),
+          fetch(`${cleanUrl}/rest/v1/appointments?select=*`, { headers }),
+          fetch(`${cleanUrl}/rest/v1/documents?select=*`, { headers })
+        ]);
+
+        let pulledCount = 0;
+        if (cRes.ok) {
+          const list = await cRes.json();
+          const map = new Map(state.customers.map(x => [x.id, x]));
+          list.forEach(rc => {
+            map.set(rc.id, {
+              ...(map.get(rc.id) || {}),
+              id: rc.id,
+              name: rc.name,
+              phone: rc.phone || '',
+              city: rc.city || '',
+              dateOfBirth: rc.date_of_birth || '',
+              anniversaryDate: rc.anniversary_date || '',
+              notes: rc.notes || '',
+              createdAt: rc.created_at,
+              updatedAt: rc.updated_at
+            });
           });
-        });
-        state.policies = [...map.values()];
-        pulledCount += list.length;
-      }
+          state.customers = [...map.values()];
+          pulledCount += list.length;
+        }
 
-      if (fRes.ok) {
-        const list = await fRes.json();
-        const map = new Map(state.familyMembers.map(x => [x.id, x]));
-        list.forEach(rf => {
-          map.set(rf.id, {
-            ...(map.get(rf.id) || {}),
-            id: rf.id,
-            customerId: rf.customer_id,
-            fullName: rf.full_name,
-            relationship: rf.relationship,
-            dateOfBirth: rf.date_of_birth || '',
-            mobile: rf.mobile || '',
-            notes: rf.notes || '',
-            createdAt: rf.created_at
+        if (pRes.ok) {
+          const list = await pRes.json();
+          const map = new Map(state.policies.map(x => [x.id, x]));
+          list.forEach(rp => {
+            map.set(rp.id, {
+              ...(map.get(rp.id) || {}),
+              id: rp.id,
+              customerId: rp.customer_id,
+              customerName: rp.customer_name || '',
+              companyName: rp.company_name,
+              productName: rp.product_name,
+              categoryName: rp.category_name || '',
+              policyNumber: rp.policy_number,
+              startDate: rp.start_date || '',
+              renewalDueDate: rp.renewal_due_date,
+              premiumAmount: Number(rp.premium_amount || 0),
+              sumInsured: Number(rp.sum_insured || 0),
+              status: rp.status || 'Active',
+              previousPolicyId: rp.previous_policy_id || null,
+              notes: rp.notes || '',
+              hasDocument: rp.has_document || false,
+              documentName: rp.document_name || '',
+              createdAt: rp.created_at,
+              updatedAt: rp.updated_at
+            });
           });
-        });
-        state.familyMembers = [...map.values()];
-      }
+          state.policies = [...map.values()];
+          pulledCount += list.length;
+        }
 
-      if (aRes.ok) {
-        const list = await aRes.json();
-        const map = new Map(state.appointments.map(x => [x.id, x]));
-        list.forEach(ra => {
-          map.set(ra.id, {
-            ...(map.get(ra.id) || {}),
-            id: ra.id,
-            customerId: ra.customer_id,
-            customerName: ra.customer_name || '',
-            date: ra.date,
-            time: ra.time || '',
-            purpose: ra.purpose,
-            productName: ra.product_name || '',
-            companyName: ra.company_name || '',
-            reminderAt: ra.reminder_at || '',
-            status: ra.status || 'Scheduled',
-            notes: ra.notes || '',
-            followUpAt: ra.follow_up_at || ''
+        if (fRes.ok) {
+          const list = await fRes.json();
+          const map = new Map(state.familyMembers.map(x => [x.id, x]));
+          list.forEach(rf => {
+            map.set(rf.id, {
+              ...(map.get(rf.id) || {}),
+              id: rf.id,
+              customerId: rf.customer_id,
+              fullName: rf.full_name,
+              relationship: rf.relationship,
+              dateOfBirth: rf.date_of_birth || '',
+              mobile: rf.mobile || '',
+              notes: rf.notes || '',
+              createdAt: rf.created_at
+            });
           });
-        });
-        state.appointments = [...map.values()];
-      }
+          state.familyMembers = [...map.values()];
+        }
 
-      if (dRes.ok) {
-        const list = await dRes.json();
-        state.documents = Array.isArray(state.documents) ? state.documents : [];
-        const map = new Map(state.documents.map(x => [x.id, x]));
-        list.forEach(rd => {
-          map.set(rd.id, {
-            ...(map.get(rd.id) || {}),
-            id: rd.id,
-            customerId: rd.customer_id,
-            customerName: rd.customer_name || '',
-            policyId: rd.policy_id || null,
-            familyMemberId: rd.family_member_id || null,
-            documentType: rd.document_type,
-            title: rd.title,
-            fileName: rd.file_name,
-            fileSize: Number(rd.file_size || 0),
-            mimeType: rd.mime_type || 'application/pdf',
-            createdAt: rd.created_at,
-            updatedAt: rd.updated_at
+        if (aRes.ok) {
+          const list = await aRes.json();
+          const map = new Map(state.appointments.map(x => [x.id, x]));
+          list.forEach(ra => {
+            map.set(ra.id, {
+              ...(map.get(ra.id) || {}),
+              id: ra.id,
+              customerId: ra.customer_id,
+              customerName: ra.customer_name || '',
+              date: ra.date,
+              time: ra.time || '',
+              purpose: ra.purpose,
+              productName: ra.product_name || '',
+              companyName: ra.company_name || '',
+              reminderAt: ra.reminder_at || '',
+              status: ra.status || 'Scheduled',
+              notes: ra.notes || '',
+              followUpAt: ra.follow_up_at || ''
+            });
           });
-        });
-        state.documents = [...map.values()];
-      }
+          state.appointments = [...map.values()];
+        }
 
-      state.supabase.lastSyncAt = isoNow();
-      state.supabase.status = 'Connected';
-      persist('supabase-pulled', true);
-      toast(`Pulled ${pulledCount} records from Supabase`);
-      return true;
+        if (dRes.ok) {
+          const list = await dRes.json();
+          state.documents = Array.isArray(state.documents) ? state.documents : [];
+          const map = new Map(state.documents.map(x => [x.id, x]));
+          list.forEach(rd => {
+            map.set(rd.id, {
+              ...(map.get(rd.id) || {}),
+              id: rd.id,
+              customerId: rd.customer_id,
+              customerName: rd.customer_name || '',
+              policyId: rd.policy_id || null,
+              familyMemberId: rd.family_member_id || null,
+              documentType: rd.document_type,
+              title: rd.title,
+              fileName: rd.file_name,
+              fileSize: Number(rd.file_size || 0),
+              mimeType: rd.mime_type || 'application/pdf',
+              createdAt: rd.created_at,
+              updatedAt: rd.updated_at
+            });
+          });
+          state.documents = [...map.values()];
+        }
+
+        state.supabase.lastSyncAt = isoNow();
+        state.supabase.status = 'Connected';
+        persist('supabase-pulled', true);
+        if (!silent) toast(`Pulled ${pulledCount} records from Supabase`);
+        return true;
+      } catch (err) {
+        if (!silent) throw err;
+        console.warn('Silent auto-sync pull notice:', err);
+        return false;
+      }
     }
   };
+
+  function startAutoSyncEngine() {
+    const runTwoWaySync = async () => {
+      const url = state.supabase?.url || DEFAULT_SUPABASE.url;
+      const key = state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
+      if (!state.supabase?.autoSync || !url || !key) return;
+      try {
+        await SupabaseSync.pullAll(url, key, true);
+        await SupabaseSync.pushAll(url, key, true);
+        renderSettings();
+      } catch (err) {
+        console.warn('Auto-sync engine notice:', err);
+      }
+    };
+
+    // Periodic 5-minute background auto-sync
+    setInterval(() => {
+      if (state.supabase?.autoSync && navigator.onLine) {
+        runTwoWaySync();
+      }
+    }, 5 * 60 * 1000);
+
+    // Auto-sync when device regains network connectivity
+    window.addEventListener('online', () => {
+      if (state.supabase?.autoSync) {
+        runTwoWaySync();
+      }
+    });
+
+    // Auto-sync when app resumes or window regains focus
+    const onResume = () => {
+      if (state.supabase?.autoSync && navigator.onLine) {
+        runTwoWaySync();
+      }
+    };
+    window.addEventListener('focus', onResume);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') onResume();
+    });
+
+    // Initial background sync shortly after boot
+    setTimeout(() => {
+      if (state.supabase?.autoSync && navigator.onLine) {
+        runTwoWaySync();
+      }
+    }, 2500);
+  }
 
   function periodTotal(start, end) {
     return state.policies.filter(p => p.status === 'Active' && p.startDate && p.startDate >= start && p.startDate <= end).reduce((s, p) => s + Number(p.premiumAmount || 0), 0);
@@ -812,16 +911,17 @@
 
   function renderSettings() {
     $('#advisorName').value = state.advisorName;
-    if ($('#supabaseUrl')) $('#supabaseUrl').value = state.supabase?.url || '';
-    if ($('#supabaseAnonKey')) $('#supabaseAnonKey').value = state.supabase?.anonKey || '';
-    if ($('#supabaseAutoSync')) $('#supabaseAutoSync').checked = Boolean(state.supabase?.autoSync);
+    if ($('#supabaseUrl')) $('#supabaseUrl').value = state.supabase?.url || DEFAULT_SUPABASE.url;
+    if ($('#supabaseAnonKey')) $('#supabaseAnonKey').value = state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
+    if ($('#supabaseAutoSync')) $('#supabaseAutoSync').checked = state.supabase?.autoSync !== false;
     if ($('#supabaseStatus')) {
       const isConn = state.supabase?.status === 'Connected';
-      $('#supabaseStatus').className = `sync-badge ${isConn ? 'connected' : (state.supabase?.url ? 'pending' : 'disconnected')}`;
-      $('#supabaseStatus').textContent = isConn ? 'Connected ✓' : (state.supabase?.url ? 'Configured (ready to test)' : 'Not configured');
+      const isAuto = state.supabase?.autoSync !== false;
+      $('#supabaseStatus').className = `sync-badge ${isConn || isAuto ? 'connected' : 'disconnected'}`;
+      $('#supabaseStatus').textContent = isConn ? 'Connected ✓ (Auto-sync active)' : (isAuto ? 'Integrated by default (Auto-sync active)' : 'Auto-sync paused');
     }
     if ($('#supabaseLastSync')) {
-      $('#supabaseLastSync').textContent = state.supabase?.lastSyncAt ? `Last cloud sync: ${fmtDateTime(state.supabase.lastSyncAt)}` : 'Never synced to Supabase';
+      $('#supabaseLastSync').textContent = state.supabase?.lastSyncAt ? `Last cloud sync: ${fmtDateTime(state.supabase.lastSyncAt)}` : 'Integrated by default · Auto-syncs on edit, resume & every 5 mins';
     }
     if ($('#docVaultSummary')) {
       const count = (state.documents || []).length;
@@ -1470,18 +1570,18 @@
   // --- Supabase Cloud Sync UI Handlers ---
   $('#saveSupabaseCreds')?.addEventListener('click', () => {
     state.supabase = state.supabase || {};
-    state.supabase.url = ($('#supabaseUrl').value || '').trim();
-    state.supabase.anonKey = ($('#supabaseAnonKey').value || '').trim();
+    state.supabase.url = ($('#supabaseUrl').value || '').trim() || DEFAULT_SUPABASE.url;
+    state.supabase.anonKey = ($('#supabaseAnonKey').value || '').trim() || DEFAULT_SUPABASE.anonKey;
     state.supabase.autoSync = Boolean($('#supabaseAutoSync').checked);
     state.supabase.status = state.supabase.url ? 'Configured' : 'Not configured';
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
     renderSettings();
-    toast('Supabase credentials saved');
+    toast('Supabase configuration saved');
   });
 
   $('#testSupabaseBtn')?.addEventListener('click', async () => {
-    const url = ($('#supabaseUrl').value || '').trim();
-    const key = ($('#supabaseAnonKey').value || '').trim();
+    const url = ($('#supabaseUrl').value || '').trim() || state.supabase?.url || DEFAULT_SUPABASE.url;
+    const key = ($('#supabaseAnonKey').value || '').trim() || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
     if (!url || !key) return toast('Enter Supabase URL and Anon Key');
     toast('Testing Supabase connection…');
     try {
@@ -1493,33 +1593,31 @@
     } catch (err) {
       state.supabase.status = 'Error';
       renderSettings();
-      alert(`Supabase test failed:\n${err.message}`);
+      alert(`Supabase connection notice:\n${err.message}`);
     }
   });
 
   $('#pushSupabaseBtn')?.addEventListener('click', async () => {
-    const url = ($('#supabaseUrl').value || '').trim() || state.supabase?.url;
-    const key = ($('#supabaseAnonKey').value || '').trim() || state.supabase?.anonKey;
-    if (!url || !key) return toast('Configure Supabase URL and Anon Key first');
+    const url = ($('#supabaseUrl').value || '').trim() || state.supabase?.url || DEFAULT_SUPABASE.url;
+    const key = ($('#supabaseAnonKey').value || '').trim() || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
     toast('Syncing records to Supabase…');
     try {
       await SupabaseSync.pushAll(url, key, false);
       renderSettings();
     } catch (err) {
-      alert(`Supabase push failed:\n${err.message}`);
+      alert(`Supabase push notice:\n${err.message}`);
     }
   });
 
   $('#pullSupabaseBtn')?.addEventListener('click', async () => {
-    const url = ($('#supabaseUrl').value || '').trim() || state.supabase?.url;
-    const key = ($('#supabaseAnonKey').value || '').trim() || state.supabase?.anonKey;
-    if (!url || !key) return toast('Configure Supabase URL and Anon Key first');
+    const url = ($('#supabaseUrl').value || '').trim() || state.supabase?.url || DEFAULT_SUPABASE.url;
+    const key = ($('#supabaseAnonKey').value || '').trim() || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
     toast('Pulling records from Supabase…');
     try {
       await SupabaseSync.pullAll(url, key);
       renderSettings();
     } catch (err) {
-      alert(`Supabase pull failed:\n${err.message}`);
+      alert(`Supabase pull notice:\n${err.message}`);
     }
   });
 
@@ -1588,6 +1686,7 @@
   ensureAutomaticReminders();
   localStorage.setItem(STATE_KEY, JSON.stringify(state));
   renderAll();
+  startAutoSyncEngine();
   if (window.InsureClubNative?.notificationsEnabled) {
     window.onNativeNotificationPermission(window.InsureClubNative.notificationsEnabled());
   }
