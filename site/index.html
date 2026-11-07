@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InsureClub · Cloud Database Portal</title>
+  <meta name="description" content="Direct cloud database console and management web application for InsureClub CRM on Supabase & Netlify.">
+  <link rel="icon" type="image/png" href="insureclub-logo-premium.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation Bar -->
+    <header class="top-nav">
+      <div class="nav-brand">
+        <button id="mobileMenuToggle" class="mobile-toggle" aria-label="Toggle navigation">☰</button>
+        <img src="insureclub-logo-premium.png" alt="InsureClub Logo" class="brand-logo">
+        <div class="brand-text">
+          <span class="brand-title">InsureClub</span>
+          <span class="brand-badge">Cloud Database Console</span>
+        </div>
+      </div>
+
+      <div class="nav-controls">
+        <div id="connectionPill" class="status-pill connected" title="Supabase Cloud Connection">
+          <span class="status-dot"></span>
+          <span id="connectionText">Supabase Connected</span>
+        </div>
+
+        <button id="refreshCloudBtn" class="action-btn secondary" title="Fetch latest data from Supabase">
+          <span class="btn-icon">↻</span>
+          <span class="btn-label">Refresh Data</span>
+        </button>
+
+        <button id="quickAddBtn" class="action-btn primary" title="Add record to cloud database">
+          <span class="btn-icon">＋</span>
+          <span class="btn-label">New Record</span>
+        </button>
+
+        <a href="#settings" class="avatar-pill" data-nav="settings" title="Cloud Settings">
+          <span class="avatar-initials">IC</span>
+        </a>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <!-- Left Sidebar Navigation -->
+      <aside class="sidebar" id="sidebar">
+        <nav class="nav-menu">
+          <div class="nav-group-title">WORKSPACE</div>
+          <button class="nav-item active" data-view="dashboard">
+            <span class="nav-icon">📊</span>
+            <span>Dashboard & KPIs</span>
+          </button>
+          <button class="nav-item" data-view="customers">
+            <span class="nav-icon">👥</span>
+            <span>Customers</span>
+            <span class="nav-count" id="badgeCustomers">0</span>
+          </button>
+          <button class="nav-item" data-view="policies">
+            <span class="nav-icon">📋</span>
+            <span>Policies Explorer</span>
+            <span class="nav-count" id="badgePolicies">0</span>
+          </button>
+          <button class="nav-item" data-view="documents">
+            <span class="nav-icon">🪪</span>
+            <span>Document Vault</span>
+            <span class="nav-count" id="badgeDocuments">0</span>
+          </button>
+          <button class="nav-item" data-view="appointments">
+            <span class="nav-icon">📅</span>
+            <span>Appointments</span>
+            <span class="nav-count" id="badgeAppointments">0</span>
+          </button>
+          <button class="nav-item" data-view="reminders">
+            <span class="nav-icon">⏰</span>
+            <span>Reminders</span>
+            <span class="nav-count" id="badgeReminders">0</span>
+          </button>
+
+          <div class="nav-group-title" style="margin-top:20px">CLOUD DATABASE</div>
+          <button class="nav-item" data-view="explorer">
+            <span class="nav-icon">🗄️</span>
+            <span>Raw Table Explorer</span>
+          </button>
+          <button class="nav-item" data-view="settings">
+            <span class="nav-icon">⚙️</span>
+            <span>Supabase Settings</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="footer-card">
+            <div class="footer-title">⚡ Realtime Sync Active</div>
+            <div class="footer-sub">Changes made here or on your Android app synchronize in real time.</div>
+            <div class="footer-meta" id="lastSyncLabel">Updated: Just now</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content Views -->
+      <main class="main-content" id="mainContent">
+
+        <!-- 1. DASHBOARD VIEW -->
+        <section class="view-panel active" id="view-dashboard">
+          <div class="view-header">
+            <div>
+              <span class="eyebrow">COMMAND CONSOLE</span>
+              <h1>Cloud Database Overview</h1>
+              <p>Live health, records telemetry, and customer portfolios synced with Supabase.</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn secondary" id="exportFullJson">Export JSON</button>
+              <button class="btn primary" data-modal="customerModal">＋ Add Customer</button>
+            </div>
+          </div>
+
+          <!-- KPI Metrics Grid -->
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-head">
+                <span class="metric-title">TOTAL CUSTOMERS</span>
+                <span class="metric-tag">Cloud Synced</span>
+              </div>
+              <div class="metric-value" id="kpiCustomers">0</div>
+              <div class="metric-foot">Client portfolios registered in cloud</div>
+            </div>
+
+            <div class="metric-card highlight">
+              <div class="metric-head">
+                <span class="metric-title">ACTIVE POLICIES</span>
+                <span class="metric-tag green">In Force</span>
+              </div>
+              <div class="metric-value" id="kpiActivePolicies">0</div>
+              <div class="metric-foot" id="kpiPreservedPolicies">0 historical policies preserved</div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-head">
+                <span class="metric-title">ANNUAL PREMIUM</span>
+                <span class="metric-tag">INR ₹</span>
+              </div>
+              <div class="metric-value" id="kpiTotalPremium">₹0</div>
+              <div class="metric-foot" id="kpiSumInsured">Total Sum Insured: ₹0</div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-head">
+                <span class="metric-title">DOCUMENT VAULT</span>
+                <span class="metric-tag">Metadata</span>
+              </div>
+              <div class="metric-value" id="kpiDocCount">0</div>
+              <div class="metric-foot">PAN, Birth Certs, Aadhaar & Schedules</div>
+            </div>
+          </div>
+
+          <!-- Quick Action Bar -->
+          <div class="quick-banner">
+            <div class="quick-banner-text">
+              <strong>Need to create a new record?</strong>
+              <span>Changes are committed directly to Supabase cloud tables with 0ms latency.</span>
+            </div>
+            <div class="quick-banner-buttons">
+              <button class="btn sm primary" data-modal="customerModal">Add Customer</button>
+              <button class="btn sm secondary" data-modal="policyModal">Add Policy</button>
+              <button class="btn sm secondary" data-modal="appointmentModal">Fix Appointment</button>
+              <button class="btn sm secondary" data-modal="documentModal">Attach Doc Metadata</button>
+            </div>
+          </div>
+
+          <!-- Dashboard Two-Column Grid -->
+          <div class="dashboard-columns">
+            <div class="card">
+              <div class="card-head">
+                <h3>Upcoming Renewals (Next 30 Days)</h3>
+                <span class="badge" id="renewalCountBadge">0 due</span>
+              </div>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      <th>Policy</th>
+                      <th>Company</th>
+                      <th>Renewal Date</th>
+                      <th>Premium</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="upcomingRenewalsTable">
+                    <tr><td colspan="6" class="table-empty">No renewals due in the next 30 days</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <h3>Live Database Distribution</h3>
+                <span class="badge green">Realtime</span>
+              </div>
+              <div class="distribution-list" id="distributionList">
+                <div class="dist-row">
+                  <span>Customers (public.customers)</span>
+                  <strong id="distCustomers">0 rows</strong>
+                </div>
+                <div class="dist-row">
+                  <span>Policies (public.policies)</span>
+                  <strong id="distPolicies">0 rows</strong>
+                </div>
+                <div class="dist-row">
+                  <span>Family Members (public.family_members)</span>
+                  <strong id="distFamily">0 rows</strong>
+                </div>
+                <div class="dist-row">
+                  <span>Appointments (public.appointments)</span>
+                  <strong id="distAppointments">0 rows</strong>
+                </div>
+                <div class="dist-row">
+                  <span>Reminders (public.reminders)</span>
+                  <strong id="distReminders">0 rows</strong>
+                </div>
+                <div class="dist-row">
+                  <span>Document Registry (public.documents)</span>
+                  <strong id="distDocs">0 rows</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. CUSTOMERS VIEW -->
+        <section class="view-panel" id="view-customers">
+          <div class="view-header">
+            <div>
+              <span class="eyebrow">RELATIONSHIP DIRECTORY</span>
+              <h1>Customer Database</h1>
+              <p>Manage customer profiles, contact information, family members, and linked policies.</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn secondary" id="exportCustomersCsv">Export CSV</button>
+              <button class="btn primary" data-modal="customerModal">＋ Add Customer</button>
+            </div>
+          </div>
+
+          <div class="filter-bar">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="customerSearch" placeholder="Search customer by name, mobile, city, or ID…">
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Customer Name</th>
+                    <th>Mobile</th>
+                    <th>City</th>
+                    <th>Policies</th>
+                    <th>Family</th>
+                    <th>Documents</th>
+                    <th>Created</th>
+                    <th style="text-align:right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="customersTableBody">
+                  <tr><td colspan="8" class="table-empty">Loading customers from Supabase…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. POLICIES VIEW -->
+        <section class="view-panel" id="view-policies">
+          <div class="view-header">
+            <div>
+              <span class="eyebrow">PROTECTION PORTFOLIO</span>
+              <h1>Policies & History Preservation</h1>
+              <p>Active policies and preserved previous term records with zero data deletion.</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn secondary" id="exportPoliciesCsv">Export CSV</button>
+              <button class="btn primary" data-modal="policyModal">＋ Add Policy</button>
+            </div>
+          </div>
+
+          <div class="filter-bar">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="policySearch" placeholder="Search by policy number, customer, company, or product…">
+            </div>
+            <div class="filter-group">
+              <button class="filter-pill active" data-policy-filter="all">All</button>
+              <button class="filter-pill" data-policy-filter="active">Active Only</button>
+              <button class="filter-pill" data-policy-filter="renewed">Renewed / Preserved</button>
+              <button class="filter-pill" data-policy-filter="historical">Historical</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Company & Product</th>
+                    <th>Policy Number</th>
+                    <th>Renewal Due</th>
+                    <th>Premium</th>
+                    <th>Sum Insured</th>
+                    <th>Status</th>
+                    <th style="text-align:right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="policiesTableBody">
+                  <tr><td colspan="8" class="table-empty">Loading policies from Supabase…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. DOCUMENTS VAULT VIEW -->
+        <section class="view-panel" id="view-documents">
+          <div class="view-header">
+            <div>
+              <span class="eyebrow">LOCAL-FIRST ATTACHMENT VAULT</span>
+              <h1>Document Registry</h1>
+              <p>Cloud registry tracking attached PAN cards, birth certificates, Aadhaar cards, and policy schedules.</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn primary" data-modal="documentModal">＋ Register Document</button>
+            </div>
+          </div>
+
+          <div class="privacy-callout">
+            <span class="callout-icon">🔒</span>
+            <div>
+              <strong>Privacy Architecture Guarantee</strong>
+              <p>Physical attached files (PDFs, images, scans) are stored locally in your phone or browser device storage. Only audit metadata (title, category, filename, size, customer link) syncs to the cloud to guarantee privacy.</p>
+            </div>
+          </div>
+
+          <div class="filter-bar">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="docSearch" placeholder="Search document by title, customer, or type…">
+            </div>
+            <div class="filter-group">
+              <button class="filter-pill active" data-doc-filter="all">All</button>
+              <button class="filter-pill" data-doc-filter="PAN Card">PAN Cards</button>
+              <button class="filter-pill" data-doc-filter="Birth Certificate">Birth Certs</button>
+              <button class="filter-pill" data-doc-filter="Aadhaar Card">Aadhaar</button>
+              <button class="filter-pill" data-doc-filter="Policy Document">Policy Schedules</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Document Title</th>
+                    <th>Type</th>
+                    <th>Customer</th>
+                    <th>Filename</th>
+                    <th>File Size</th>
+                    <th>MIME</th>
+                    <th>Attached Date</th>
+                    <th style="text-align:right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="documentsTableBody">
+                  <tr><td colspan="8" class="table-empty">Loading document metadata from Supabase…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. APPOINTMENTS VIEW -->
+        <section class="view-panel" id="view-appointments">
+          <div class="view-header">
+            <div>
+              <span class="eyebrow">CALENDAR & ENGAGEMENT</span>
+              <h1>Appointments & Meetings</h1>
+              <p>Client discussions, proposal meetings, and scheduled service appointments.</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn primary" data-modal="appointmentModal">＋ Fix Appointment</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Purpose</th>
+                    <th>Date & Time</th>
+                    <th>Product / Company</th>
+                    <th>Status</th>
+                    <th>Notes</th>
+                    <th style="text-align:right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="appointmentsTableBody">
+                  <tr><td colspan="7" class="table-empty">Loading appointments from Supabase…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6. REMINDERS VIEW -->
+        <section class="view-panel" id="view-reminders">
+          <div class="view-header">
+            <div>
+              <span class="eyebrow">ACTIONABLE QUEUE</span>
+              <h1>Follow-up & Reminders</h1>
+              <p>Renewal warnings, client birthday wishes, policy anniversaries, and follow-ups.</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn primary" data-modal="reminderModal">＋ Add Reminder</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Type</th>
+                    <th>Activity</th>
+                    <th>Due Date</th>
+                    <th>Status</th>
+                    <th style="text-align:right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="remindersTableBody">
+                  <tr><td colspan="6" class="table-empty">Loading reminders from Supabase…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 7. RAW TABLE EXPLORER -->
+        <section class="view-panel" id="view-explorer">
+          <div class="view-header">
+            <div>
+              <span class="eyebrow">DATABASE INSPECTOR</span>
+              <h1>Raw Table Explorer</h1>
+              <p>Direct view into PostgreSQL tables hosted on Supabase.</p>
+            </div>
+            <div class="view-actions">
+              <button class="btn secondary" id="exportExplorerJson">Export Table JSON</button>
+              <button class="btn secondary" id="exportExplorerCsv">Export Table CSV</button>
+            </div>
+          </div>
+
+          <div class="filter-bar">
+            <label style="display:flex;align-items:center;gap:10px;font-weight:700">
+              Select Table:
+              <select id="rawTableSelect" class="form-input" style="width:220px">
+                <option value="customers">public.customers</option>
+                <option value="policies">public.policies</option>
+                <option value="family_members">public.family_members</option>
+                <option value="appointments">public.appointments</option>
+                <option value="reminders">public.reminders</option>
+                <option value="documents">public.documents</option>
+              </select>
+            </label>
+            <span id="rawRowCount" class="badge">0 rows</span>
+          </div>
+
+          <div class="card">
+            <div class="table-wrap" style="max-height:600px;overflow:auto">
+              <table class="data-table" id="rawDataTable">
+                <thead id="rawTableHead"><tr><th>Column</th></tr></thead>
+                <tbody id="rawTableBody"><tr><td>Select a table to inspect</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 8. SETTINGS VIEW -->
+        <section class="view-panel" id="view-settings">
+          <div class="view-header">
+            <div>
+              <span class="eyebrow">INFRASTRUCTURE CONFIG</span>
+              <h1>Supabase Cloud Connection</h1>
+              <p>Configure credentials, inspect connection latency, and check table health.</p>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <h3>Cloud Project Configuration</h3>
+            <p class="settings-desc">Pre-configured with default credentials so this portal works right out of the box.</p>
+
+            <form id="settingsForm">
+              <div class="form-group">
+                <label for="cfgSupabaseUrl">Supabase Project URL</label>
+                <input type="url" id="cfgSupabaseUrl" class="form-input" required placeholder="https://xyz.supabase.co">
+              </div>
+
+              <div class="form-group">
+                <label for="cfgSupabaseKey">Supabase Public Anon Key</label>
+                <input type="text" id="cfgSupabaseKey" class="form-input" required placeholder="eyJhbGciOi...">
+              </div>
+
+              <div class="form-row" style="margin-top:16px">
+                <button type="submit" class="btn primary">Save Configuration</button>
+                <button type="button" class="btn secondary" id="testConnBtn">Test Connection</button>
+                <button type="button" class="btn secondary" id="resetDefaultsBtn">Reset to Default</button>
+              </div>
+            </form>
+
+            <div id="testResultBox" class="test-result-box hidden"></div>
+          </div>
+
+          <div class="settings-card" style="margin-top:20px">
+            <h3>Netlify Deployment Details</h3>
+            <p class="settings-desc">This application is deployed and hosted on Netlify as a high-speed Single Page App (SPA).</p>
+            <div class="dist-row">
+              <span>Hosting Provider</span>
+              <strong>Netlify Cloud Edge</strong>
+            </div>
+            <div class="dist-row">
+              <span>Database Provider</span>
+              <strong>Supabase PostgreSQL</strong>
+            </div>
+            <div class="dist-row">
+              <span>Local Storage Vault</span>
+              <strong>IndexedDB / Isolated Device Storage</strong>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- MODALS -->
+  <!-- 1. Customer Modal -->
+  <div class="modal-backdrop" id="customerModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="customerModalTitle">Add Customer</h3>
+        <button class="modal-close" data-close-modal>×</button>
+      </div>
+      <form id="customerForm">
+        <input type="hidden" name="id" id="custFieldId">
+        <div class="form-group">
+          <label>Full Name *</label>
+          <input type="text" name="name" id="custFieldName" class="form-input" required placeholder="e.g. Rahul Sharma">
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Mobile Number *</label>
+            <input type="tel" name="phone" id="custFieldPhone" class="form-input" required placeholder="e.g. 9876543210">
+          </div>
+          <div class="form-group">
+            <label>City</label>
+            <input type="text" name="city" id="custFieldCity" class="form-input" placeholder="e.g. Delhi">
+          </div>
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Date of Birth</label>
+            <input type="date" name="date_of_birth" id="custFieldDob" class="form-input">
+          </div>
+          <div class="form-group">
+            <label>Anniversary Date</label>
+            <input type="date" name="anniversary_date" id="custFieldAnniversary" class="form-input">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Notes / Client History</label>
+          <textarea name="notes" id="custFieldNotes" class="form-input" rows="3" placeholder="Key client notes..."></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" data-close-modal>Cancel</button>
+          <button type="submit" class="btn primary">Save Customer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. Policy Modal -->
+  <div class="modal-backdrop" id="policyModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="policyModalTitle">Add Policy</h3>
+        <button class="modal-close" data-close-modal>×</button>
+      </div>
+      <form id="policyForm">
+        <input type="hidden" name="id" id="polFieldId">
+        <div class="form-group">
+          <label>Customer *</label>
+          <select name="customer_id" id="polFieldCustomer" class="form-input" required>
+            <option value="">Select Customer</option>
+          </select>
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Insurance Company *</label>
+            <input type="text" name="company_name" id="polFieldCompany" class="form-input" required placeholder="e.g. Star Health / LIC">
+          </div>
+          <div class="form-group">
+            <label>Product Name *</label>
+            <input type="text" name="product_name" id="polFieldProduct" class="form-input" required placeholder="e.g. Comprehensive Health">
+          </div>
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Policy Number *</label>
+            <input type="text" name="policy_number" id="polFieldNumber" class="form-input" required placeholder="e.g. POL-98234">
+          </div>
+          <div class="form-group">
+            <label>Category</label>
+            <input type="text" name="category_name" id="polFieldCategory" class="form-input" placeholder="e.g. Health / Life / Motor">
+          </div>
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Start Date</label>
+            <input type="date" name="start_date" id="polFieldStartDate" class="form-input">
+          </div>
+          <div class="form-group">
+            <label>Renewal Due Date *</label>
+            <input type="date" name="renewal_due_date" id="polFieldRenewalDate" class="form-input" required>
+          </div>
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Annual Premium (₹)</label>
+            <input type="number" step="any" name="premium_amount" id="polFieldPremium" class="form-input" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label>Sum Insured (₹)</label>
+            <input type="number" step="any" name="sum_insured" id="polFieldSumInsured" class="form-input" placeholder="0">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select name="status" id="polFieldStatus" class="form-input">
+            <option value="Active">Active</option>
+            <option value="Renewed">Renewed (Preserved)</option>
+            <option value="Historical">Historical</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea name="notes" id="polFieldNotes" class="form-input" rows="2"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" data-close-modal>Cancel</button>
+          <button type="submit" class="btn primary">Save Policy</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. Renew Policy Modal (Preserves Old Policy Term) -->
+  <div class="modal-backdrop" id="renewModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Renew Policy · Preserve History</h3>
+        <button class="modal-close" data-close-modal>×</button>
+      </div>
+      <form id="renewForm">
+        <input type="hidden" name="old_policy_id" id="renewOldPolicyId">
+        <p class="privacy-note" style="margin-bottom:14px">
+          <strong>Policy Preservation Guarantee:</strong> The current policy will be preserved as status <code>Renewed</code> with all historical data and attached documents intact. A new policy record will be created for the new term.
+        </p>
+        <div class="form-group">
+          <label>Renewal Policy Number *</label>
+          <input type="text" name="policy_number" id="renewPolicyNumber" class="form-input" required>
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>New Term Start Date *</label>
+            <input type="date" name="start_date" id="renewStartDate" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label>New Term Renewal Date *</label>
+            <input type="date" name="renewal_due_date" id="renewDueDate" class="form-input" required>
+          </div>
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Company *</label>
+            <input type="text" name="company_name" id="renewCompany" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label>Product *</label>
+            <input type="text" name="product_name" id="renewProduct" class="form-input" required>
+          </div>
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>New Premium (₹) *</label>
+            <input type="number" step="any" name="premium_amount" id="renewPremium" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label>Sum Insured (₹)</label>
+            <input type="number" step="any" name="sum_insured" id="renewSumInsured" class="form-input">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Renewal Notes</label>
+          <textarea name="notes" id="renewNotes" class="form-input" rows="2"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" data-close-modal>Cancel</button>
+          <button type="submit" class="btn primary">Renew & Preserve Old Term</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. Document Metadata Modal -->
+  <div class="modal-backdrop" id="documentModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Register Document Metadata</h3>
+        <button class="modal-close" data-close-modal>×</button>
+      </div>
+      <form id="documentForm">
+        <div class="form-group">
+          <label>Customer *</label>
+          <select name="customer_id" id="docFieldCustomer" class="form-input" required>
+            <option value="">Select Customer</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Document Type *</label>
+          <select name="document_type" id="docFieldType" class="form-input" required>
+            <option value="PAN Card">PAN Card</option>
+            <option value="Birth Certificate">Birth Certificate</option>
+            <option value="Aadhaar Card">Aadhaar Card</option>
+            <option value="Policy Document">Policy Document / Schedule</option>
+            <option value="Proposal Form">Proposal Form</option>
+            <option value="Premium Receipt">Premium Receipt</option>
+            <option value="Driving License">Driving License / Voter ID</option>
+            <option value="Medical Report">Medical Examination Report</option>
+            <option value="Other Document">Other Document</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Document Title / Description *</label>
+          <input type="text" name="title" id="docFieldTitle" class="form-input" required placeholder="e.g. Rahul PAN Card 2026">
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Filename *</label>
+            <input type="text" name="file_name" id="docFieldFileName" class="form-input" required placeholder="e.g. pan_card.pdf">
+          </div>
+          <div class="form-group">
+            <label>File Size (Bytes)</label>
+            <input type="number" name="file_size" id="docFieldFileSize" class="form-input" value="125000">
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" data-close-modal>Cancel</button>
+          <button type="submit" class="btn primary">Register Document</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 5. Appointment Modal -->
+  <div class="modal-backdrop" id="appointmentModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Schedule Appointment</h3>
+        <button class="modal-close" data-close-modal>×</button>
+      </div>
+      <form id="appointmentForm">
+        <div class="form-group">
+          <label>Customer *</label>
+          <select name="customer_id" id="aptFieldCustomer" class="form-input" required>
+            <option value="">Select Customer</option>
+          </select>
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Date *</label>
+            <input type="date" name="date" id="aptFieldDate" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label>Time</label>
+            <input type="time" name="time" id="aptFieldTime" class="form-input" value="10:00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Purpose *</label>
+          <input type="text" name="purpose" id="aptFieldPurpose" class="form-input" required placeholder="e.g. Policy Renewal Discussion">
+        </div>
+        <div class="form-grid two-col">
+          <div class="form-group">
+            <label>Company / Provider</label>
+            <input type="text" name="company_name" id="aptFieldCompany" class="form-input" placeholder="e.g. Star Health">
+          </div>
+          <div class="form-group">
+            <label>Product</label>
+            <input type="text" name="product_name" id="aptFieldProduct" class="form-input" placeholder="e.g. Family Optima">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select name="status" id="aptFieldStatus" class="form-input">
+            <option value="Scheduled">Scheduled</option>
+            <option value="Completed">Completed</option>
+            <option value="Rescheduled">Rescheduled</option>
+            <option value="Follow-up Required">Follow-up Required</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Meeting Notes</label>
+          <textarea name="notes" id="aptFieldNotes" class="form-input" rows="2"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" data-close-modal>Cancel</button>
+          <button type="submit" class="btn primary">Save Appointment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 6. Customer Detail Drawer -->
+  <div class="drawer-backdrop" id="customerDrawer">
+    <div class="drawer-panel">
+      <div class="drawer-header">
+        <div>
+          <span class="eyebrow">CUSTOMER PORTFOLIO</span>
+          <h2 id="drawerCustomerName">Customer Details</h2>
+        </div>
+        <button class="drawer-close" id="drawerCloseBtn">✕</button>
+      </div>
+      <div class="drawer-body" id="drawerBody">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

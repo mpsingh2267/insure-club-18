@@ -35,6 +35,13 @@ InsureClub is an end-to-end insurance CRM and entry management suite built for i
 │
 ├── supabase/             # Supabase cloud database schema & migrations
 │   └── schema.sql        # Database tables, indexes, and RLS policies
+├── site/                 # Netlify Web Portal (Supabase Cloud Database Console)
+│   ├── index.html        # Single-page console application
+│   ├── styles.css        # Responsive portal styles
+│   ├── app.js            # Supabase REST & Realtime WebSocket client
+│   └── _redirects        # Netlify SPA route redirect configuration
+│
+├── netlify.toml          # Netlify build and deployment configuration
 │
 └── assets/               # Branding assets, UI screenshots, and diagrams
 ```
@@ -80,3 +87,22 @@ cd android
 ./gradlew assembleRelease
 ```
 Pre-built APKs are available in the [`releases/`](./releases/) directory.
+
+---
+
+## 3. Netlify Cloud Database Portal (`site/`)
+
+A live, high-speed single-page web console designed to run on Netlify edge hosting to access and manage the Supabase cloud database directly from any browser or desktop.
+
+### Features
+- **Cloud Database Dashboard**: Real-time KPI counters (active policies, preserved historical policies, annual premium ₹, sum insured ₹, document vault).
+- **Customer & Policy Management**: Create, edit, and search client records and policies in Supabase.
+- **Policy Term Preservation**: When renewing a policy on the web, older policy terms are preserved as `Renewed` and new terms are created with zero data deletion.
+- **Document Metadata Registry**: Track attached PAN cards, birth certificates, Aadhaar cards, and policy schedules.
+- **Raw SQL / Table Explorer**: Direct interactive inspector for all 6 database tables (`customers`, `policies`, `family_members`, `appointments`, `reminders`, `documents`) with JSON and CSV exports.
+- **Pre-Configured**: Out of the box pre-connected to Supabase cloud database with configurable connection settings.
+
+### Deploy to Netlify
+1. Connect this repository (`mpsingh2267/insure-club-18`) to Netlify via the [Netlify Dashboard](https://app.netlify.com/).
+2. Netlify will automatically detect [`netlify.toml`](./netlify.toml) with `publish = "site"`.
+3. Click **Deploy Site** — it builds and deploys in seconds!
