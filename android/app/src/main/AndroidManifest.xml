@@ -31,7 +31,7 @@
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <provider
             android:name=".PolicyDocumentProvider"
-            android:authorities="${applicationId}.documents"
+            android:authorities="com.insureclub.crm.documents"
             android:exported="false"
             android:grantUriPermissions="true" />
         <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">

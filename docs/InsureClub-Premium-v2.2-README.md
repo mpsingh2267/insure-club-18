@@ -67,7 +67,7 @@ Target SDK: 35
 Min SDK: 26
 
 # SHA-256 Checksum
-240ca7c542a0b5d5ce893c130cda8b359f1c478eb64aab5ea428f2dab504d03a  releases/InsureClub-Premium-v2.2.apk
+0f355acbdf5aa1d2816949a5fb20e9ada1d88e7dfbfbfb0da1cd181f2a47de56  releases/InsureClub-Premium-v2.2.apk
 ```
 
 Verification status:

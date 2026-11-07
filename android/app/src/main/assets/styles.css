@@ -37,3 +37,25 @@ input:focus,select:focus,textarea:focus{border-color:#57a969;box-shadow:0 0 0 3p
 .subtab-bar button{padding:6px 11px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--muted);font-size:9px;font-weight:800}
 .subtab-bar button.active{background:#17652d;color:#fff;border-color:#17652d}
 
+/* Clinic Story-style sync pill in topbar and sync indicators */
+.topbar-actions{display:flex;align-items:center;gap:8px}
+.topbar-sync-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid #d4e4d8;border-radius:18px;background:#f5faf6;color:#17652d;font-size:9.5px;font-weight:800;cursor:pointer;transition:all .18s;outline:0}
+.topbar-sync-pill:hover{background:#eaf5ed;border-color:#b8d5bf}
+.sync-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.sync-dot.synced{background:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,.2)}
+.sync-dot.pending{background:#eab308;box-shadow:0 0 0 2px rgba(234,179,8,.2);animation:pulse-sync 1.8s infinite}
+.sync-dot.syncing{background:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.2);animation:spin-sync 1s linear infinite}
+.sync-dot.offline{background:#94a3b8}
+@keyframes pulse-sync{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.85)}}
+@keyframes spin-sync{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+.sync-overview-card{padding:14px;border:1px solid var(--line);border-radius:15px;background:#f9fbf9;margin-bottom:12px}
+.sync-overview-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sync-overview-title{font-size:12px;font-weight:850;color:var(--ink)}
+.sync-overview-sub{margin-top:4px;color:var(--muted);font-size:9.5px;line-height:1.4}
+.sync-status-banner{display:flex;align-items:center;gap:8px;padding:11px 13px;border-radius:12px;font-size:11px;font-weight:800;margin-top:10px}
+.sync-status-banner.synced{background:#eaf8f0;color:#177238;border:1px solid #c2e8cf}
+.sync-status-banner.pending{background:#fefce8;color:#a16207;border:1px solid #fef08a}
+.sync-status-banner.syncing{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+.sync-status-banner.offline{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+
+

@@ -10,7 +10,7 @@
   const ARRAYS = [
     'customers', 'familyMembers', 'policies', 'policyHistory', 'reminders',
     'appointments', 'activities', 'messageTemplates', 'companies', 'products',
-    'categories', 'portingReminders', 'documents'
+    'categories', 'portingReminders', 'documents', 'outbox'
   ];
   const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
   const uid = p => `${p}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -65,6 +65,8 @@
       categories: [],
       portingReminders: [],
       documents: [],
+      outbox: [],
+      syncState: 'synced',
       supabase: {
         url: DEFAULT_SUPABASE.url,
         anonKey: DEFAULT_SUPABASE.anonKey,
@@ -88,6 +90,8 @@
       const stored = JSON.parse(localStorage.getItem(STATE_KEY) || 'null');
       if (stored?.schemaVersion >= 2) {
         ARRAYS.forEach(k => stored[k] = Array.isArray(stored[k]) ? stored[k] : []);
+        stored.outbox = Array.isArray(stored.outbox) ? stored.outbox : [];
+        stored.syncState = stored.outbox.length > 0 ? 'pending' : 'synced';
         stored.supabase = stored.supabase || {};
         if (!stored.supabase.url) {
           stored.supabase.url = DEFAULT_SUPABASE.url;
@@ -184,17 +188,68 @@
     state.reminders = [...manual, ...desired.map(r => completed.get(r.id) || r)];
   }
 
+  function updateSyncUI() {
+    const s = state.syncState || (state.outbox?.length ? 'pending' : 'synced');
+    const outboxCount = (state.outbox || []).length;
+    const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    const effectiveState = !isOnline && s !== 'syncing' ? 'offline' : s;
+
+    // Topbar Pill
+    const dot = $('#topbarSyncDot');
+    const txt = $('#topbarSyncText');
+    if (dot && txt) {
+      dot.className = `sync-dot ${effectiveState}`;
+      if (effectiveState === 'syncing') txt.textContent = 'Syncing…';
+      else if (effectiveState === 'pending') txt.textContent = `${outboxCount} pending`;
+      else if (effectiveState === 'offline') txt.textContent = 'Offline';
+      else txt.textContent = 'Synced';
+    }
+
+    // Settings Banner
+    const banner = $('#syncStatusBanner');
+    const bannerDot = $('#syncBannerDot');
+    const bannerTxt = $('#syncBannerText');
+    if (banner && bannerDot && bannerTxt) {
+      banner.className = `sync-status-banner ${effectiveState}`;
+      bannerDot.className = `sync-dot ${effectiveState}`;
+      if (effectiveState === 'syncing') bannerTxt.textContent = 'Synchronizing records…';
+      else if (effectiveState === 'pending') bannerTxt.textContent = `${outboxCount} change${outboxCount === 1 ? '' : 's'} pending`;
+      else if (effectiveState === 'offline') bannerTxt.textContent = 'Offline · Changes will sync when reconnected';
+      else bannerTxt.textContent = 'All changes synchronized';
+    }
+
+    if ($('#supabaseLastSync')) {
+      $('#supabaseLastSync').textContent = state.supabase?.lastSyncAt
+        ? `Last cloud sync: ${fmtDateTime(state.supabase.lastSyncAt)}`
+        : 'Integrated by default · Auto-sync active';
+    }
+  }
+
+  function queueOutbox(bucket, action, recordId, payload) {
+    state.outbox = Array.isArray(state.outbox) ? state.outbox : [];
+    // Remove previous pending entry for this record in this bucket to coalesce mutations
+    state.outbox = state.outbox.filter(item => !(item.bucket === bucket && item.recordId === recordId));
+    state.outbox.push({
+      id: uid('outbox'),
+      bucket,
+      action,
+      recordId,
+      payload,
+      timestamp: isoNow()
+    });
+    state.syncState = 'pending';
+    updateSyncUI();
+    if (state.supabase?.autoSync !== false) {
+      triggerAutoSync(1000);
+    }
+  }
+
   let autoSyncDebounce = null;
-  function triggerAutoSync(delay = 1500) {
+  function triggerAutoSync(delay = 1000) {
     if (!state.supabase?.autoSync || !state.supabase?.url || !state.supabase?.anonKey) return;
     clearTimeout(autoSyncDebounce);
-    autoSyncDebounce = setTimeout(async () => {
-      try {
-        await SupabaseSync.pushAll(state.supabase.url, state.supabase.anonKey, true);
-        renderSettings();
-      } catch (err) {
-        console.warn('Auto-sync push error:', err);
-      }
+    autoSyncDebounce = setTimeout(() => {
+      performSync(false);
     }, delay);
   }
 
@@ -210,6 +265,7 @@
     }
 
     renderAll();
+    updateSyncUI();
     if (!quiet) toast('Saved securely');
   }
   window.InsureClubAppBackup = reason => {
@@ -560,38 +616,328 @@
     }
   };
 
-  function startAutoSyncEngine() {
-    const runTwoWaySync = async () => {
-      const url = state.supabase?.url || DEFAULT_SUPABASE.url;
-      const key = state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
-      if (!state.supabase?.autoSync || !url || !key) return;
-      try {
-        await SupabaseSync.pullAll(url, key, true);
-        await SupabaseSync.pushAll(url, key, true);
-        renderSettings();
-      } catch (err) {
-        console.warn('Auto-sync engine notice:', err);
-      }
-    };
+  let isSyncing = false;
+  async function performSync(manual = false) {
+    if (isSyncing) return;
+    const url = state.supabase?.url || DEFAULT_SUPABASE.url;
+    const key = state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
+    if (!url || !key) {
+      if (manual) toast('Supabase credentials missing');
+      return;
+    }
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      state.syncState = 'offline';
+      updateSyncUI();
+      if (manual) toast('Device is offline');
+      return;
+    }
 
-    // Periodic 5-minute background auto-sync
+    isSyncing = true;
+    state.syncState = 'syncing';
+    updateSyncUI();
+
+    try {
+      const cleanUrl = url.replace(/\/+$/, '');
+      const headers = {
+        'apikey': key,
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json'
+      };
+
+      // 1. Process Outbox Queue (Offline mutations to be applied to Supabase)
+      state.outbox = Array.isArray(state.outbox) ? state.outbox : [];
+      if (state.outbox.length > 0) {
+        const queue = [...state.outbox];
+        for (const item of queue) {
+          try {
+            if (item.action === 'upsert' && item.payload) {
+              const res = await fetch(`${cleanUrl}/rest/v1/${item.bucket}`, {
+                method: 'POST',
+                headers: { ...headers, 'Prefer': 'resolution=merge-duplicates' },
+                body: JSON.stringify(item.payload)
+              });
+              if (!res.ok) {
+                console.warn(`Outbox push failed for ${item.bucket}/${item.recordId}:`, res.status);
+              } else {
+                state.outbox = state.outbox.filter(x => x.id !== item.id);
+              }
+            } else if (item.action === 'delete') {
+              const res = await fetch(`${cleanUrl}/rest/v1/${item.bucket}?id=eq.${encodeURIComponent(item.recordId)}`, {
+                method: 'DELETE',
+                headers
+              });
+              if (!res.ok && res.status !== 404) {
+                console.warn(`Outbox delete failed for ${item.bucket}/${item.recordId}:`, res.status);
+              } else {
+                state.outbox = state.outbox.filter(x => x.id !== item.id);
+              }
+            }
+          } catch (itemErr) {
+            console.warn('Outbox item dispatch error:', itemErr);
+          }
+        }
+      }
+
+      // If manual sync was triggered and outbox is clear, guarantee full push of existing records
+      if (manual && state.outbox.length === 0) {
+        await SupabaseSync.pushAll(url, key, true);
+      }
+
+      // 2. Pull remote updates from Supabase
+      await SupabaseSync.pullAll(url, key, true);
+
+      state.supabase.lastSyncAt = isoNow();
+      state.supabase.status = 'Connected';
+      state.syncState = state.outbox.length > 0 ? 'pending' : 'synced';
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+      updateSyncUI();
+      renderAll();
+
+      if (manual) {
+        toast('All changes synchronized ✓');
+      }
+    } catch (err) {
+      console.warn('performSync error:', err);
+      state.syncState = state.outbox.length > 0 ? 'pending' : 'synced';
+      updateSyncUI();
+      if (manual) toast(`Sync notice: ${err.message || 'Check connection'}`);
+    } finally {
+      isSyncing = false;
+      updateSyncUI();
+    }
+  }
+
+  let realtimeWs = null;
+  let realtimeHeartbeat = null;
+  let realtimeReconnectTimer = null;
+  let wsMsgRef = 1;
+
+  function initSupabaseRealtime() {
+    const url = state.supabase?.url || DEFAULT_SUPABASE.url;
+    const key = state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
+    if (!state.supabase?.autoSync || !url || !key) return;
+    if (typeof WebSocket === 'undefined') return;
+    if (realtimeWs && (realtimeWs.readyState === WebSocket.OPEN || realtimeWs.readyState === WebSocket.CONNECTING)) return;
+
+    try {
+      const wsUrl = url.replace(/^http/, 'ws').replace(/\/+$/, '') + `/realtime/v1/websocket?apikey=${encodeURIComponent(key)}&vsn=1.0.0`;
+      realtimeWs = new WebSocket(wsUrl);
+
+      realtimeWs.onopen = () => {
+        clearInterval(realtimeHeartbeat);
+        realtimeHeartbeat = setInterval(() => {
+          if (realtimeWs && realtimeWs.readyState === WebSocket.OPEN) {
+            realtimeWs.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(wsMsgRef++) }));
+          }
+        }, 25000);
+
+        realtimeWs.send(JSON.stringify({
+          topic: 'realtime:public',
+          event: 'phx_join',
+          payload: {
+            config: {
+              broadcast: { self: false },
+              postgres_changes: [
+                { event: '*', schema: 'public', table: 'customers' },
+                { event: '*', schema: 'public', table: 'policies' },
+                { event: '*', schema: 'public', table: 'family_members' },
+                { event: '*', schema: 'public', table: 'appointments' },
+                { event: '*', schema: 'public', table: 'documents' }
+              ]
+            }
+          },
+          ref: String(wsMsgRef++)
+        }));
+      };
+
+      realtimeWs.onmessage = evt => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.event === 'postgres_changes' && msg.payload?.data) {
+            handleRealtimeEvent(msg.payload.data);
+          }
+        } catch (e) {
+          console.warn('Realtime parse error:', e);
+        }
+      };
+
+      realtimeWs.onclose = () => {
+        clearInterval(realtimeHeartbeat);
+        scheduleRealtimeReconnect();
+      };
+
+      realtimeWs.onerror = () => {
+        try { realtimeWs.close(); } catch {}
+      };
+    } catch (e) {
+      console.warn('Realtime init error:', e);
+      scheduleRealtimeReconnect();
+    }
+  }
+
+  function scheduleRealtimeReconnect() {
+    clearTimeout(realtimeReconnectTimer);
+    realtimeReconnectTimer = setTimeout(() => {
+      if (state.supabase?.autoSync && navigator.onLine) {
+        initSupabaseRealtime();
+      }
+    }, 10000);
+  }
+
+  function handleRealtimeEvent(data) {
+    const { table, type, record, old_record } = data;
+    const recId = record?.id || old_record?.id;
+    if (!recId) return;
+
+    // If there is an unpushed outbox change for this record, skip to preserve local draft
+    const hasPendingOutbox = (state.outbox || []).some(o => o.bucket === table && o.recordId === recId);
+    if (hasPendingOutbox) return;
+
+    if (table === 'customers') {
+      if (type === 'DELETE') {
+        state.customers = state.customers.filter(c => c.id !== recId);
+      } else if (record) {
+        const mapped = {
+          id: record.id,
+          name: record.name,
+          phone: record.phone || '',
+          city: record.city || '',
+          dateOfBirth: record.date_of_birth || '',
+          anniversaryDate: record.anniversary_date || '',
+          notes: record.notes || '',
+          createdAt: record.created_at || isoNow(),
+          updatedAt: record.updated_at || isoNow()
+        };
+        const idx = state.customers.findIndex(c => c.id === mapped.id);
+        if (idx >= 0) state.customers[idx] = { ...state.customers[idx], ...mapped };
+        else state.customers.unshift(mapped);
+      }
+    } else if (table === 'policies') {
+      if (type === 'DELETE') {
+        state.policies = state.policies.filter(p => p.id !== recId);
+      } else if (record) {
+        const existing = policyBy(record.id);
+        const mapped = {
+          id: record.id,
+          customerId: record.customer_id,
+          customerName: record.customer_name || existing?.customerName || '',
+          companyName: record.company_name,
+          productName: record.product_name,
+          categoryName: record.category_name || '',
+          policyNumber: record.policy_number,
+          startDate: record.start_date || '',
+          renewalDueDate: record.renewal_due_date,
+          premiumAmount: Number(record.premium_amount || 0),
+          sumInsured: Number(record.sum_insured || 0),
+          status: record.status || 'Active',
+          previousPolicyId: record.previous_policy_id || null,
+          notes: record.notes || '',
+          hasDocument: record.has_document || existing?.hasDocument || false,
+          documentName: record.document_name || existing?.documentName || '',
+          createdAt: record.created_at || isoNow(),
+          updatedAt: record.updated_at || isoNow()
+        };
+        const idx = state.policies.findIndex(p => p.id === mapped.id);
+        if (idx >= 0) state.policies[idx] = { ...state.policies[idx], ...mapped };
+        else state.policies.unshift(mapped);
+      }
+    } else if (table === 'family_members') {
+      if (type === 'DELETE') {
+        state.familyMembers = state.familyMembers.filter(f => f.id !== recId);
+      } else if (record) {
+        const mapped = {
+          id: record.id,
+          customerId: record.customer_id,
+          fullName: record.full_name,
+          relationship: record.relationship,
+          dateOfBirth: record.date_of_birth || '',
+          mobile: record.mobile || '',
+          notes: record.notes || '',
+          createdAt: record.created_at || isoNow()
+        };
+        const idx = state.familyMembers.findIndex(f => f.id === mapped.id);
+        if (idx >= 0) state.familyMembers[idx] = { ...state.familyMembers[idx], ...mapped };
+        else state.familyMembers.unshift(mapped);
+      }
+    } else if (table === 'appointments') {
+      if (type === 'DELETE') {
+        state.appointments = state.appointments.filter(a => a.id !== recId);
+      } else if (record) {
+        const mapped = {
+          id: record.id,
+          customerId: record.customer_id || null,
+          customerName: record.customer_name || '',
+          date: record.date,
+          time: record.time || '',
+          purpose: record.purpose,
+          productName: record.product_name || '',
+          companyName: record.company_name || '',
+          reminderAt: record.reminder_at || '',
+          status: record.status || 'Scheduled',
+          notes: record.notes || '',
+          followUpAt: record.follow_up_at || ''
+        };
+        const idx = state.appointments.findIndex(a => a.id === mapped.id);
+        if (idx >= 0) state.appointments[idx] = { ...state.appointments[idx], ...mapped };
+        else state.appointments.unshift(mapped);
+      }
+    } else if (table === 'documents') {
+      state.documents = Array.isArray(state.documents) ? state.documents : [];
+      if (type === 'DELETE') {
+        state.documents = state.documents.filter(d => d.id !== recId);
+      } else if (record) {
+        const existing = state.documents.find(d => d.id === record.id);
+        const mapped = {
+          id: record.id,
+          customerId: record.customer_id,
+          customerName: record.customer_name || existing?.customerName || '',
+          policyId: record.policy_id || null,
+          familyMemberId: record.family_member_id || null,
+          documentType: record.document_type,
+          title: record.title,
+          fileName: record.file_name,
+          fileSize: Number(record.file_size || 0),
+          mimeType: record.mime_type || 'application/pdf',
+          createdAt: record.created_at || isoNow(),
+          updatedAt: record.updated_at || isoNow()
+        };
+        const idx = state.documents.findIndex(d => d.id === mapped.id);
+        if (idx >= 0) state.documents[idx] = { ...state.documents[idx], ...mapped };
+        else state.documents.unshift(mapped);
+      }
+    }
+
+    localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    renderAll();
+  }
+
+  function startAutoSyncEngine() {
+    // 5-minute periodic background sync
     setInterval(() => {
       if (state.supabase?.autoSync && navigator.onLine) {
-        runTwoWaySync();
+        performSync(false);
       }
     }, 5 * 60 * 1000);
 
     // Auto-sync when device regains network connectivity
     window.addEventListener('online', () => {
+      updateSyncUI();
       if (state.supabase?.autoSync) {
-        runTwoWaySync();
+        performSync(false);
+        initSupabaseRealtime();
       }
+    });
+
+    window.addEventListener('offline', () => {
+      state.syncState = 'offline';
+      updateSyncUI();
     });
 
     // Auto-sync when app resumes or window regains focus
     const onResume = () => {
       if (state.supabase?.autoSync && navigator.onLine) {
-        runTwoWaySync();
+        performSync(false);
+        initSupabaseRealtime();
       }
     };
     window.addEventListener('focus', onResume);
@@ -599,12 +945,14 @@
       if (document.visibilityState === 'visible') onResume();
     });
 
-    // Initial background sync shortly after boot
+    // Initial sync and Realtime connection shortly after boot
     setTimeout(() => {
+      updateSyncUI();
       if (state.supabase?.autoSync && navigator.onLine) {
-        runTwoWaySync();
+        performSync(false);
+        initSupabaseRealtime();
       }
-    }, 2500);
+    }, 1800);
   }
 
   function periodTotal(start, end) {
@@ -927,6 +1275,7 @@
       const count = (state.documents || []).length;
       $('#docVaultSummary').textContent = `${count} document${count === 1 ? '' : 's'} (PAN, Birth Cert, Policies) stored securely in private local storage`;
     }
+    updateSyncUI();
   }
 
   function renderAll() {
@@ -947,6 +1296,17 @@
             record = { ...(current || {}), id: data.id || uid('customer'), name: data.name.trim(), phone: data.phone.trim(), city: data.city.trim(), dateOfBirth: data.dateOfBirth, anniversaryDate: data.anniversaryDate, notes: data.notes.trim(), createdAt: current?.createdAt || isoNow(), updatedAt: isoNow() };
       state.customers = current ? state.customers.map(x => x.id === record.id ? record : x) : [record, ...state.customers];
       state.policies.forEach(p => { if (p.customerId === record.id) p.customerName = record.name; });
+      queueOutbox('customers', 'upsert', record.id, {
+        id: record.id,
+        name: record.name,
+        phone: record.phone || null,
+        city: record.city || null,
+        date_of_birth: record.dateOfBirth || null,
+        anniversary_date: record.anniversaryDate || null,
+        notes: record.notes || null,
+        created_at: record.createdAt,
+        updated_at: record.updatedAt
+      });
       addActivity(record.id, current ? 'Customer profile updated' : 'Customer created');
       closeForm();
       persist('customer-saved');
@@ -961,6 +1321,16 @@
       const current = state.familyMembers.find(x => x.id === data.id),
             record = { ...current, id: data.id || uid('family'), customerId: data.customerId, fullName: data.fullName.trim(), relationship: data.relationship.trim(), dateOfBirth: data.dateOfBirth, mobile: data.mobile.trim(), notes: data.notes.trim() };
       state.familyMembers = current ? state.familyMembers.map(x => x.id === record.id ? record : x) : [record, ...state.familyMembers];
+      queueOutbox('family_members', 'upsert', record.id, {
+        id: record.id,
+        customer_id: record.customerId,
+        full_name: record.fullName,
+        relationship: record.relationship,
+        date_of_birth: record.dateOfBirth || null,
+        mobile: record.mobile || null,
+        notes: record.notes || null,
+        created_at: record.createdAt
+      });
       addActivity(customerId, current ? `Family member updated · ${record.fullName}` : `Family member added · ${record.fullName}`);
       closeForm();
       persist('family-saved');
@@ -1002,6 +1372,27 @@
         state.policies = [record, ...state.policies];
       }
 
+      queueOutbox('policies', 'upsert', record.id, {
+        id: record.id,
+        customer_id: record.customerId,
+        customer_name: record.customerName || null,
+        company_name: record.companyName,
+        product_name: record.productName,
+        category_name: record.categoryName || null,
+        policy_number: record.policyNumber,
+        start_date: record.startDate || null,
+        renewal_due_date: record.renewalDueDate,
+        premium_amount: Number(record.premiumAmount || 0),
+        sum_insured: Number(record.sumInsured || 0),
+        status: record.status || 'Active',
+        previous_policy_id: record.previousPolicyId || null,
+        notes: record.notes || null,
+        has_document: Boolean(record.hasDocument),
+        document_name: record.documentName || null,
+        created_at: record.createdAt,
+        updated_at: record.updatedAt
+      });
+
       ensureReference(record.companyName, 'companies');
       ensureReference(record.productName, 'products');
       ensureReference(record.categoryName, 'categories');
@@ -1020,6 +1411,26 @@
       // 1. Preserve the old policy: update status to 'Renewed' so it remains in state.policies with its documents intact!
       oldPolicy.status = 'Renewed';
       oldPolicy.updatedAt = isoNow();
+      queueOutbox('policies', 'upsert', oldPolicy.id, {
+        id: oldPolicy.id,
+        customer_id: oldPolicy.customerId,
+        customer_name: oldPolicy.customerName || null,
+        company_name: oldPolicy.companyName,
+        product_name: oldPolicy.productName,
+        category_name: oldPolicy.categoryName || null,
+        policy_number: oldPolicy.policyNumber,
+        start_date: oldPolicy.startDate || null,
+        renewal_due_date: oldPolicy.renewalDueDate,
+        premium_amount: Number(oldPolicy.premiumAmount || 0),
+        sum_insured: Number(oldPolicy.sumInsured || 0),
+        status: 'Renewed',
+        previous_policy_id: oldPolicy.previousPolicyId || null,
+        notes: oldPolicy.notes || null,
+        has_document: Boolean(oldPolicy.hasDocument),
+        document_name: oldPolicy.documentName || null,
+        created_at: oldPolicy.createdAt,
+        updated_at: oldPolicy.updatedAt
+      });
 
       // 2. Create the brand new policy record for the new term
       const newPolicy = {
@@ -1043,6 +1454,26 @@
         updatedAt: isoNow()
       };
       state.policies.unshift(newPolicy);
+      queueOutbox('policies', 'upsert', newPolicy.id, {
+        id: newPolicy.id,
+        customer_id: newPolicy.customerId,
+        customer_name: newPolicy.customerName || null,
+        company_name: newPolicy.companyName,
+        product_name: newPolicy.productName,
+        category_name: newPolicy.categoryName || null,
+        policy_number: newPolicy.policyNumber,
+        start_date: newPolicy.startDate || null,
+        renewal_due_date: newPolicy.renewalDueDate,
+        premium_amount: Number(newPolicy.premiumAmount || 0),
+        sum_insured: Number(newPolicy.sumInsured || 0),
+        status: 'Active',
+        previous_policy_id: newPolicy.previousPolicyId || null,
+        notes: newPolicy.notes || null,
+        has_document: false,
+        document_name: null,
+        created_at: newPolicy.createdAt,
+        updated_at: newPolicy.updatedAt
+      });
 
       // 3. Also record in policy history
       state.policyHistory.unshift({
@@ -1132,6 +1563,20 @@
       const c = customerBy(data.customerId), current = state.appointments.find(x => x.id === data.id),
             record = { ...current, id: data.id || uid('appointment'), customerId: c.id, customerName: c.name, date: data.date, time: data.time, purpose: data.purpose.trim(), productName: data.productName.trim(), companyName: data.companyName.trim(), reminderAt: data.reminderAt, status: data.status, notes: data.notes.trim(), followUpAt: data.followUpAt };
       state.appointments = current ? state.appointments.map(x => x.id === record.id ? record : x) : [record, ...state.appointments];
+      queueOutbox('appointments', 'upsert', record.id, {
+        id: record.id,
+        customer_id: record.customerId || null,
+        customer_name: record.customerName || null,
+        date: record.date,
+        time: record.time || null,
+        purpose: record.purpose,
+        product_name: record.productName || null,
+        company_name: record.companyName || null,
+        reminder_at: record.reminderAt || null,
+        status: record.status || 'Scheduled',
+        notes: record.notes || null,
+        follow_up_at: record.followUpAt || null
+      });
       if (record.status === 'Follow-up Required') state.reminders.push({ id: uid('reminder'), customerId: c.id, customerName: c.name, type: 'Follow-up', activity: 'Appointment follow-up', dueAt: record.followUpAt, status: 'Pending', notes: record.notes, auto: false });
       addActivity(c.id, `${current ? 'Appointment updated' : 'Appointment fixed'} · ${record.purpose}`);
       closeForm();
@@ -1249,6 +1694,21 @@
         }
       }
 
+      queueOutbox('documents', 'upsert', docRecord.id, {
+        id: docRecord.id,
+        customer_id: docRecord.customerId,
+        customer_name: docRecord.customerName || null,
+        policy_id: docRecord.policyId || null,
+        family_member_id: docRecord.familyMemberId || null,
+        document_type: docRecord.documentType,
+        title: docRecord.title,
+        file_name: docRecord.fileName,
+        file_size: Number(docRecord.fileSize || 0),
+        mime_type: docRecord.mimeType || 'application/pdf',
+        created_at: docRecord.createdAt,
+        updated_at: docRecord.updatedAt
+      });
+
       addActivity(docRecord.customerId, `Document stored locally · ${docRecord.documentType} (${docRecord.title})`);
       pendingDocUpload = null;
       persist('document-attached');
@@ -1282,6 +1742,41 @@
         updatedAt: isoNow()
       });
     }
+
+    queueOutbox('documents', 'upsert', `doc-pol-${p.id}`, {
+      id: `doc-pol-${p.id}`,
+      customer_id: p.customerId,
+      customer_name: p.customerName || null,
+      policy_id: p.id,
+      family_member_id: null,
+      document_type: 'Policy Document',
+      title: `${p.companyName} ${p.productName} Schedule`,
+      file_name: name,
+      file_size: 0,
+      mime_type: 'application/pdf',
+      created_at: isoNow(),
+      updated_at: isoNow()
+    });
+    queueOutbox('policies', 'upsert', p.id, {
+      id: p.id,
+      customer_id: p.customerId,
+      customer_name: p.customerName || null,
+      company_name: p.companyName,
+      product_name: p.productName,
+      category_name: p.categoryName || null,
+      policy_number: p.policyNumber,
+      start_date: p.startDate || null,
+      renewal_due_date: p.renewalDueDate,
+      premium_amount: Number(p.premiumAmount || 0),
+      sum_insured: Number(p.sumInsured || 0),
+      status: p.status || 'Active',
+      previous_policy_id: p.previousPolicyId || null,
+      notes: p.notes || null,
+      has_document: true,
+      document_name: name,
+      created_at: p.createdAt || isoNow(),
+      updated_at: isoNow()
+    });
 
     addActivity(p.customerId, `Policy PDF added · ${p.productName}`);
     persist('policy-document-added');
@@ -1344,12 +1839,33 @@
       const doc = state.documents.find(x => x.id === t.dataset.deleteDoc);
       if (doc && confirm(`Delete ${doc.documentType}: "${doc.title || doc.fileName}"? The local file will be removed.`)) {
         window.InsureClubNative?.deleteDocument?.(doc.id);
+        queueOutbox('documents', 'delete', doc.id, null);
         state.documents = state.documents.filter(x => x.id !== doc.id);
         if (doc.policyId) {
           const pol = policyBy(doc.policyId);
           if (pol && !state.documents.some(d => d.policyId === pol.id)) {
             pol.hasDocument = false;
             pol.documentName = '';
+            queueOutbox('policies', 'upsert', pol.id, {
+              id: pol.id,
+              customer_id: pol.customerId,
+              customer_name: pol.customerName || null,
+              company_name: pol.companyName,
+              product_name: pol.productName,
+              category_name: pol.categoryName || null,
+              policy_number: pol.policyNumber,
+              start_date: pol.startDate || null,
+              renewal_due_date: pol.renewalDueDate,
+              premium_amount: Number(pol.premiumAmount || 0),
+              sum_insured: Number(pol.sumInsured || 0),
+              status: pol.status || 'Active',
+              previous_policy_id: pol.previousPolicyId || null,
+              notes: pol.notes || null,
+              has_document: false,
+              document_name: null,
+              created_at: pol.createdAt || isoNow(),
+              updated_at: isoNow()
+            });
           }
         }
         addActivity(doc.customerId, `Document deleted · ${doc.title || doc.fileName}`);
@@ -1367,6 +1883,7 @@
     if (t.dataset.familyDelete) {
       const f = state.familyMembers.find(x => x.id === t.dataset.familyDelete);
       if (f && confirm(`Delete ${f.fullName}?`)) {
+        queueOutbox('family_members', 'delete', f.id, null);
         state.familyMembers = state.familyMembers.filter(x => x.id !== f.id);
         state.reminders = state.reminders.filter(x => x.familyMemberId !== f.id);
         addActivity(f.customerId, `Family member deleted · ${f.fullName}`);
@@ -1383,8 +1900,21 @@
     if (t.dataset.deleteCustomer) {
       const c = customerBy(t.dataset.deleteCustomer);
       if (c && confirm(`Delete ${c.name} and all linked policies, documents, family, reminders and appointments?`)) {
-        state.documents.filter(d => d.customerId === c.id).forEach(d => window.InsureClubNative?.deleteDocument?.(d.id));
-        state.policies.filter(p => p.customerId === c.id && p.hasDocument).forEach(p => window.InsureClubNative?.deletePolicyPdf?.(p.id));
+        state.documents.filter(d => d.customerId === c.id).forEach(d => {
+          window.InsureClubNative?.deleteDocument?.(d.id);
+          queueOutbox('documents', 'delete', d.id, null);
+        });
+        state.policies.filter(p => p.customerId === c.id).forEach(p => {
+          if (p.hasDocument) window.InsureClubNative?.deletePolicyPdf?.(p.id);
+          queueOutbox('policies', 'delete', p.id, null);
+        });
+        state.familyMembers.filter(f => f.customerId === c.id).forEach(f => {
+          queueOutbox('family_members', 'delete', f.id, null);
+        });
+        state.appointments.filter(a => a.customerId === c.id).forEach(a => {
+          queueOutbox('appointments', 'delete', a.id, null);
+        });
+        queueOutbox('customers', 'delete', c.id, null);
         ARRAYS.forEach(k => {
           if (k === 'customers') state[k] = state[k].filter(x => x.id !== c.id);
           else state[k] = state[k].filter(x => x.customerId !== c.id);
@@ -1399,7 +1929,11 @@
       const p = policyBy(t.dataset.policyDelete);
       if (p && confirm(`Delete policy ${p.policyNumber || p.productName}? This will only delete this specific policy.`)) {
         if (p.hasDocument) window.InsureClubNative?.deletePolicyPdf?.(p.id);
-        state.documents.filter(d => d.policyId === p.id).forEach(d => window.InsureClubNative?.deleteDocument?.(d.id));
+        state.documents.filter(d => d.policyId === p.id).forEach(d => {
+          window.InsureClubNative?.deleteDocument?.(d.id);
+          queueOutbox('documents', 'delete', d.id, null);
+        });
+        queueOutbox('policies', 'delete', p.id, null);
         state.policies = state.policies.filter(x => x.id !== p.id);
         state.reminders = state.reminders.filter(x => x.policyId !== p.id);
         state.portingReminders = state.portingReminders.filter(x => x.policyId !== p.id);
@@ -1425,6 +1959,27 @@
         p.hasDocument = false;
         p.documentName = '';
         state.documents = state.documents.filter(d => d.policyId !== p.id);
+        queueOutbox('documents', 'delete', `doc-pol-${p.id}`, null);
+        queueOutbox('policies', 'upsert', p.id, {
+          id: p.id,
+          customer_id: p.customerId,
+          customer_name: p.customerName || null,
+          company_name: p.companyName,
+          product_name: p.productName,
+          category_name: p.categoryName || null,
+          policy_number: p.policyNumber,
+          start_date: p.startDate || null,
+          renewal_due_date: p.renewalDueDate,
+          premium_amount: Number(p.premiumAmount || 0),
+          sum_insured: Number(p.sumInsured || 0),
+          status: p.status || 'Active',
+          previous_policy_id: p.previousPolicyId || null,
+          notes: p.notes || null,
+          has_document: false,
+          document_name: null,
+          created_at: p.createdAt || isoNow(),
+          updated_at: isoNow()
+        });
         addActivity(p.customerId, `Policy PDF deleted · ${p.productName}`);
         persist('policy-document-deleted');
       }
@@ -1573,10 +2128,14 @@
     state.supabase.url = ($('#supabaseUrl').value || '').trim() || DEFAULT_SUPABASE.url;
     state.supabase.anonKey = ($('#supabaseAnonKey').value || '').trim() || DEFAULT_SUPABASE.anonKey;
     state.supabase.autoSync = Boolean($('#supabaseAutoSync').checked);
-    state.supabase.status = state.supabase.url ? 'Configured' : 'Not configured';
+    state.supabase.status = state.supabase.url ? 'Connected' : 'Not configured';
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
     renderSettings();
     toast('Supabase configuration saved');
+    if (state.supabase.autoSync && navigator.onLine) {
+      performSync(false);
+      initSupabaseRealtime();
+    }
   });
 
   $('#testSupabaseBtn')?.addEventListener('click', async () => {
@@ -1597,29 +2156,8 @@
     }
   });
 
-  $('#pushSupabaseBtn')?.addEventListener('click', async () => {
-    const url = ($('#supabaseUrl').value || '').trim() || state.supabase?.url || DEFAULT_SUPABASE.url;
-    const key = ($('#supabaseAnonKey').value || '').trim() || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
-    toast('Syncing records to Supabase…');
-    try {
-      await SupabaseSync.pushAll(url, key, false);
-      renderSettings();
-    } catch (err) {
-      alert(`Supabase push notice:\n${err.message}`);
-    }
-  });
-
-  $('#pullSupabaseBtn')?.addEventListener('click', async () => {
-    const url = ($('#supabaseUrl').value || '').trim() || state.supabase?.url || DEFAULT_SUPABASE.url;
-    const key = ($('#supabaseAnonKey').value || '').trim() || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
-    toast('Pulling records from Supabase…');
-    try {
-      await SupabaseSync.pullAll(url, key);
-      renderSettings();
-    } catch (err) {
-      alert(`Supabase pull notice:\n${err.message}`);
-    }
-  });
+  $('#syncNowBtn')?.addEventListener('click', () => performSync(true));
+  $('#topbarSyncBtn')?.addEventListener('click', () => performSync(true));
 
   // Backup & Restore
   $('#exportBackup').addEventListener('click', () => window.InsureClubNative?.exportData?.(JSON.stringify(state)));
