@@ -18,7 +18,7 @@
     url: 'https://insureclub-sync.supabase.co',
     anonKey: 'sandbox'
   };
-  const isLiveProject = url => String(url || '').replace(/\/+$/, '') === DEFAULT_SUPABASE.url;
+  const isLiveProject = url => (Auth ? Auth.isProjectUrl(url) : String(url || '').replace(/\/+$/, '') === DEFAULT_SUPABASE.url);
   const needsSignIn = () => Boolean(Auth) && isLiveProject(state.supabase?.url) && !Auth.isSignedIn();
 
   // Pre-bundled SQL schema for 1-click execution in Supabase SQL editor
@@ -371,6 +371,10 @@
     if (cached) {
       state = { ...state, ...cached };
       if (!state.supabase?.url) state.supabase = { ...DEFAULT_SUPABASE };
+      // Any saved address for this project (typed by hand earlier) -> canonical URL + key.
+      if (isLiveProject(state.supabase.url)) {
+        state.supabase = { ...DEFAULT_SUPABASE };
+      }
       // One-time move from the old placeholder project to the live cloud project.
       // The old sandbox data is kept in a separate backup key, never deleted.
       if (state.supabase.url === SANDBOX_SUPABASE.url && !state.sandboxChosen) {
@@ -1526,8 +1530,8 @@
         return;
       }
 
-      state.supabase.url = rawUrl;
-      state.supabase.anonKey = rawKey;
+      state.supabase.url = isLiveProject(rawUrl) ? DEFAULT_SUPABASE.url : rawUrl;
+      state.supabase.anonKey = isLiveProject(rawUrl) ? DEFAULT_SUPABASE.anonKey : rawKey;
       state.sandboxChosen = false;
       persistState();
       toast('Supabase credentials saved. Connecting to cloud…', 'info');
@@ -1882,6 +1886,9 @@
     if (isSandboxMode()) {
       setConnectionStatus('sandbox');
     } else if (needsSignIn()) {
+      ['customers', 'policies', 'familyMembers', 'appointments', 'reminders', 'documents'].forEach(k => { state[k] = []; });
+      persistState();
+      renderAll();
       setConnectionStatus('signin');
       Auth.prompt();
     } else {

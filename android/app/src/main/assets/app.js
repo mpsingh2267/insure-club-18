@@ -111,7 +111,7 @@
         stored.outbox = Array.isArray(stored.outbox) ? stored.outbox : [];
         stored.syncState = stored.outbox.length > 0 ? 'pending' : 'synced';
         stored.supabase = stored.supabase || {};
-        if (!stored.supabase.url || stored.supabase.url.replace(/\/+$/, '') === LEGACY_PLACEHOLDER_URL) {
+        if (!stored.supabase.url || stored.supabase.url.replace(/\/+$/, '') === LEGACY_PLACEHOLDER_URL || (Auth && Auth.isProjectUrl(stored.supabase.url))) {
           stored.supabase.url = DEFAULT_SUPABASE.url;
           stored.supabase.anonKey = DEFAULT_SUPABASE.anonKey;
           stored.supabase.status = 'Ready (Auto-sync active)';
@@ -654,7 +654,7 @@
     }
     // The live cloud project only accepts signed-in advisors. Changes wait safely in the
     // local outbox until then.
-    if (Auth && url.replace(/\/+$/, '') === Auth.PROJECT_URL && !Auth.isSignedIn()) {
+    if (Auth && Auth.isProjectUrl(url) && !Auth.isSignedIn()) {
       state.supabase.status = 'Sign in required';
       updateSyncUI();
       if (manual) Auth.prompt();
@@ -746,7 +746,7 @@
     const key = state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
     if (!state.supabase?.autoSync || !url || !key || isPlaceholderUrl(url)) return;
     if (typeof WebSocket === 'undefined') return;
-    const isLive = Boolean(Auth) && url.replace(/\/+$/, '') === Auth.PROJECT_URL;
+    const isLive = Boolean(Auth) && Auth.isProjectUrl(url);
     if (isLive && !Auth.isSignedIn()) return;
     if (realtimeWs && (realtimeWs.readyState === WebSocket.OPEN || realtimeWs.readyState === WebSocket.CONNECTING)) return;
 
@@ -2191,7 +2191,7 @@
     const url = ($('#supabaseUrl').value || '').trim() || state.supabase?.url || DEFAULT_SUPABASE.url;
     const key = ($('#supabaseAnonKey').value || '').trim() || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
     if (!url || !key) return toast('Enter Supabase URL and Anon Key');
-    if (Auth && url.replace(/\/+$/, '') === Auth.PROJECT_URL && !Auth.isSignedIn()) {
+    if (Auth && Auth.isProjectUrl(url) && !Auth.isSignedIn()) {
       Auth.prompt();
       return;
     }

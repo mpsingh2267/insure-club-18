@@ -13,6 +13,18 @@
   'use strict';
 
   const PROJECT_URL = 'https://pzezoumopzwczakpsdlk.supabase.co';
+  const PROJECT_HOST = 'pzezoumopzwczakpsdlk.supabase.co';
+
+  // True for any address on this project, however it was typed (case, trailing slash, no https).
+  function isProjectUrl(url) {
+    try {
+      const raw = String(url || '').trim();
+      const u = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`);
+      return u.hostname.toLowerCase() === PROJECT_HOST;
+    } catch {
+      return false;
+    }
+  }
   const PUBLISHABLE_KEY = 'sb_publishable_M6hWtVUT1bwaAkV2Ma6VKw_OzToQzvz';
   const SESSION_KEY = 'insureclub_supabase_session_v1';
   const REFRESH_MARGIN_SECONDS = 60;
@@ -116,11 +128,17 @@
 
   window.fetch = async function insureClubFetch(input, init) {
     const url = requestUrl(input);
-    if (!url.startsWith(`${PROJECT_URL}/rest/v1/`)) {
+    let isProjectApi = false;
+    try {
+      const u = new URL(url, window.location.href);
+      isProjectApi = u.hostname.toLowerCase() === PROJECT_HOST && u.pathname.replace(/\/{2,}/g, '/').startsWith('/rest/v1/');
+    } catch {}
+    if (!isProjectApi) {
       return nativeFetch(input, init);
     }
     const token = await accessToken().catch(() => null);
     if (!token) {
+      prompt();
       const err = new Error('Sign in to sync with InsureClub cloud.');
       err.code = 'NOT_SIGNED_IN';
       throw err;
@@ -244,6 +262,7 @@
   window.InsureClubAuth = {
     PROJECT_URL,
     PUBLISHABLE_KEY,
+    isProjectUrl,
     isSignedIn: () => Boolean(session),
     email: () => session?.email || null,
     accessToken,
