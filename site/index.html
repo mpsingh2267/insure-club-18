@@ -177,7 +177,7 @@
               <button class="btn sm primary" data-modal="customerModal">Add Customer</button>
               <button class="btn sm secondary" data-modal="policyModal">Add Policy</button>
               <button class="btn sm secondary" data-modal="appointmentModal">Fix Appointment</button>
-              <button class="btn sm secondary" data-modal="documentModal">Attach Doc Metadata</button>
+              <button class="btn sm secondary" data-modal="documentModal">Upload Document</button>
             </div>
           </div>
 
@@ -345,7 +345,7 @@
               <p>Cloud registry tracking attached PAN cards, birth certificates, Aadhaar cards, and policy schedules.</p>
             </div>
             <div class="view-actions">
-              <button class="btn primary" data-modal="documentModal">＋ Register Document</button>
+              <button class="btn primary" data-modal="documentModal">＋ Upload Document</button>
             </div>
           </div>
 
@@ -772,7 +772,7 @@
   <div class="modal-backdrop" id="documentModal">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3>Register Document Metadata</h3>
+        <h3>Upload Document</h3>
         <button class="modal-close" data-close-modal>×</button>
       </div>
       <form id="documentForm">
@@ -800,19 +800,23 @@
           <label>Document Title / Description *</label>
           <input type="text" name="title" id="docFieldTitle" class="form-input" required placeholder="e.g. Rahul PAN Card 2026">
         </div>
-        <div class="form-grid two-col">
-          <div class="form-group">
-            <label>Filename *</label>
-            <input type="text" name="file_name" id="docFieldFileName" class="form-input" required placeholder="e.g. pan_card.pdf">
-          </div>
-          <div class="form-group">
-            <label>File Size (Bytes)</label>
-            <input type="number" name="file_size" id="docFieldFileSize" class="form-input" value="125000">
+        <div class="form-group">
+          <label for="docFieldFile">File (PDF or photo) *</label>
+          <input type="file" id="docFieldFile" class="form-input" required accept="application/pdf,image/*">
+          <div class="table-subtext" id="docFileHint" style="margin-top:6px">💻 Saved on this laptop only. Just the details sync to the cloud.</div>
+        </div>
+        <div class="form-group" id="docFolderRow" hidden>
+          <label>Laptop folder</label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="btn secondary sm" id="docChooseFolderBtn">📁 Choose folder…</button>
+            <span class="table-subtext" id="docFolderStatus">No folder chosen. Files are kept in this browser.</span>
           </div>
         </div>
+        <input type="hidden" name="file_name" id="docFieldFileName">
+        <input type="hidden" name="file_size" id="docFieldFileSize">
         <div class="modal-actions">
           <button type="button" class="btn secondary" data-close-modal>Cancel</button>
-          <button type="submit" class="btn primary">Register Document</button>
+          <button type="submit" class="btn primary">Save Document</button>
         </div>
       </form>
     </div>
@@ -897,7 +901,8 @@
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <script src="supabase-auth.js?v=2.4.1"></script>
-  <script src="app.js?v=2.4.1"></script>
+  <script src="supabase-auth.js?v=2.5.0"></script>
+  <script src="local-files.js?v=2.5.0"></script>
+  <script src="app.js?v=2.5.0"></script>
 </body>
 </html>
