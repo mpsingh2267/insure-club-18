@@ -8,6 +8,7 @@
 
   const STORAGE_KEY = 'insureclub_cloud_portal_state_v1';
   const Auth = window.InsureClubAuth;
+  const Files = window.InsureClubFiles;
   // Live InsureClub cloud project (data access requires an advisor sign-in, see supabase-auth.js).
   const DEFAULT_SUPABASE = {
     url: Auth ? Auth.PROJECT_URL : 'https://pzezoumopzwczakpsdlk.supabase.co',
@@ -1195,12 +1196,18 @@
           <a href="#" class="cust-link" data-view-customer="${esc(d.customer_id)}">${esc(d.customer_name || 'Client')}</a>
         </td>
         <td>
-          <div class="vault-path-text">${esc(d.local_storage_path || 'Isolated Device Storage')}</div>
-          <div class="privacy-note">🔒 Binary stays local on device storage</div>
+          ${Files && Files.has(d.id)
+            ? `<div class="vault-path-text">💻 On this laptop${d.local_storage_path && /folder/i.test(d.local_storage_path) ? ` · ${esc(d.local_storage_path.replace(/^.*folder:\s*/i, 'folder: '))}` : ''}</div>
+               <div class="privacy-note">🔒 File stays on this laptop; only details sync</div>`
+            : `<div class="vault-path-text">${esc(d.local_storage_path || 'Stored on another device')}</div>
+               <div class="privacy-note">Not on this laptop. Open it on the device that uploaded it.</div>`}
         </td>
         <td>${fmtDate(d.created_at)}</td>
         <td class="action-cell">
-          <button class="icon-btn delete" data-delete-doc="${esc(d.id)}" title="Delete metadata record">🗑️</button>
+          ${Files && Files.has(d.id) ? `
+            <button class="icon-btn" data-open-doc="${esc(d.id)}" title="Open">👁️</button>
+            <button class="icon-btn" data-download-doc="${esc(d.id)}" title="Download a copy">⬇️</button>` : ''}
+          <button class="icon-btn delete" data-delete-doc="${esc(d.id)}" title="Delete document">🗑️</button>
         </td>
       </tr>
     `).join('');
@@ -1455,19 +1462,38 @@
       e.preventDefault();
       const form = e.target;
       const c = state.customers.find(x => x.id === form.customer_id.value);
+      const file = $('#docFieldFile')?.files?.[0];
+      if (!file) {
+        toast('Choose the file to upload', 'error');
+        return;
+      }
+      if (!Files) {
+        toast('This browser cannot store files for the site', 'error');
+        return;
+      }
+      const docId = uid('doc');
+      let saved;
+      try {
+        saved = await Files.save(docId, file);
+      } catch (err) {
+        toast(`Could not save the file on this laptop: ${err.message}`, 'error');
+        return;
+      }
       const data = {
-        id: uid('doc'),
+        id: docId,
         customer_id: form.customer_id.value,
         customer_name: c?.name || null,
         policy_id: null,
         family_member_id: null,
         document_type: form.document_type.value,
         title: form.title.value.trim(),
-        file_name: form.file_name.value.trim(),
-        file_size: Number(form.file_size.value || 0),
-        mime_type: form.file_name.value.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
-        local_storage_path: `/storage/emulated/0/InsureClub/documents/${form.file_name.value.trim()}`,
-        notes: 'File stored in local device vault. Metadata synced to database.',
+        file_name: file.name,
+        file_size: file.size,
+        mime_type: file.type || 'application/octet-stream',
+        local_storage_path: saved.savedToFolder
+          ? `Laptop (website) · folder: ${saved.savedToFolder}`
+          : 'Laptop (website) · browser storage',
+        notes: 'File saved on the laptop that uploaded it. Only these details sync to the cloud.',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -1476,11 +1502,46 @@
         await DataStore.upsert('documents', data);
         closeModal('documentModal');
         form.reset();
-        toast(`${data.document_type} metadata registered successfully ✓`, 'success');
+        toast(`${data.document_type} saved on this laptop${saved.savedToFolder ? ` (folder: ${saved.savedToFolder})` : ''} ✓`, 'success');
       } catch (err) {
-        toast(`Document registration failed: ${err.message}`, 'error');
+        // Details did not reach the cloud: remove the local copy so nothing is left orphaned.
+        await Files.remove(docId).catch(() => {});
+        renderAll();
+        toast(`Document upload failed: ${err.message}`, 'error');
       }
     });
+
+    // Fill name/size from the chosen file and suggest a title.
+    $('#docFieldFile')?.addEventListener('change', e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      $('#docFieldFileName').value = file.name;
+      $('#docFieldFileSize').value = file.size;
+      const title = $('#docFieldTitle');
+      if (title && !title.value.trim()) {
+        const c = state.customers.find(x => x.id === $('#docFieldCustomer')?.value);
+        title.value = `${c?.name ? c.name + ' ' : ''}${$('#docFieldType')?.value || 'Document'}`;
+      }
+      const hint = $('#docFileHint');
+      if (hint) hint.textContent = `💻 ${file.name} (${fmtFileSize(file.size)}) will be saved on this laptop only.`;
+    });
+
+    // Optional real folder on the laptop (Chrome/Edge only).
+    if (Files && Files.folderSupported && $('#docFolderRow')) {
+      $('#docFolderRow').hidden = false;
+      const showFolder = name => {
+        $('#docFolderStatus').textContent = name ? `Also saving into: ${name}` : 'No folder chosen. Files are kept in this browser.';
+      };
+      Files.folderName().then(showFolder).catch(() => {});
+      $('#docChooseFolderBtn')?.addEventListener('click', async () => {
+        try {
+          showFolder(await Files.chooseFolder());
+          toast('Folder chosen. New uploads are saved there too ✓', 'success');
+        } catch (err) {
+          if (err.name !== 'AbortError') toast(err.message, 'error');
+        }
+      });
+    }
 
     // 5. Appointment Form
     $('#appointmentForm')?.addEventListener('submit', async e => {
@@ -1740,12 +1801,31 @@
         }
       }
 
+      // Open / download a document saved on this laptop
+      if (t.dataset.openDoc || t.dataset.downloadDoc) {
+        const id = t.dataset.openDoc || t.dataset.downloadDoc;
+        const d = state.documents.find(x => x.id === id);
+        try {
+          const rec = Files ? await Files.get(id) : null;
+          if (!rec) {
+            toast('This file is not saved on this laptop', 'error');
+          } else if (t.dataset.openDoc) {
+            Files.view(rec, d ? `${d.title} · ${d.customer_name || ''}` : rec.name);
+          } else {
+            Files.download(rec);
+          }
+        } catch (err) {
+          toast(`Could not open file: ${err.message}`, 'error');
+        }
+      }
+
       // Delete Document
       if (t.dataset.deleteDoc) {
         const d = state.documents.find(x => x.id === t.dataset.deleteDoc);
-        if (d && confirm(`Delete document record "${d.title}"?`)) {
+        if (d && confirm(`Delete document "${d.title}"?${Files && Files.has(d.id) ? ' The file saved on this laptop is deleted too.' : ''}`)) {
           try {
             await DataStore.remove('documents', d.id);
+            if (Files) await Files.remove(d.id).catch(() => {});
             toast(`Document record "${d.title}" deleted`, 'info');
           } catch (err) {
             toast(`Delete failed: ${err.message}`, 'error');
@@ -1856,6 +1936,8 @@
     setupForms();
     setupEventDelegation();
     renderAll();
+    // Which documents have their file saved on this laptop.
+    Files?.refreshIndex().then(() => renderDocuments()).catch(() => {});
 
     // Advisor sign-in card on the Settings page.
     const settingsForm = $('#settingsForm');
