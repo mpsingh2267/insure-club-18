@@ -108,3 +108,25 @@ A live, high-speed single-page web console designed to run on Netlify edge hosti
 1. Connect this repository (`mpsingh2267/insure-club-18`) to Netlify via the [Netlify Dashboard](https://app.netlify.com/).
 2. Netlify will automatically detect [`netlify.toml`](./netlify.toml) with `publish = "site"`.
 3. Click **Deploy Site** — it builds and deploys in seconds!
+
+---
+
+## 4. Supabase Cloud (`supabase/`)
+
+All three apps sync with the Supabase project **insure-club-18** (`https://pzezoumopzwczakpsdlk.supabase.co`). The project URL and public key are built in, so nothing needs to be typed in.
+
+### Access control
+Customer data never opens to the public key alone. The tables in [`supabase/schema.sql`](./supabase/schema.sql) only allow **signed-in advisors whose confirmed email is listed in `public.crm_members`**.
+
+Add an advisor:
+1. Supabase dashboard → **Authentication → Users → Add user** (email + password, *Auto Confirm User* on).
+2. Supabase dashboard → **SQL Editor**:
+   ```sql
+   INSERT INTO public.crm_members (email) VALUES ('advisor@example.com');
+   ```
+
+### Signing in
+- **Android app & Netlify portal**: open **Settings** and sign in with the advisor email and password. Offline changes stay in the local outbox and sync after sign-in.
+- **Web CRM (`web/`)**: run `npm run connect-supabase` once. It asks for the advisor login (the password is hidden), checks it, and saves it to `web/.env` (git-ignored). Alternatively set `SUPABASE_SERVICE_ROLE_KEY` in `web/.env`.
+
+Shared sign-in code lives in `site/supabase-auth.js` (a copy ships in `android/app/src/main/assets/`).
