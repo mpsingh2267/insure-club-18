@@ -1,31 +1,60 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const DEFAULT_SUPABASE_URL = 'https://insureclub-sync.supabase.co';
-const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imluc3VyZWNsdWItc3luYyIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzA5NzcwMDAwLCJleHAiOjIwMjUzMzAwMDB9.insureclub_default_anon_key_active';
+// Live InsureClub cloud project (insure-club-18).
+const DEFAULT_SUPABASE_URL = 'https://pzezoumopzwczakpsdlk.supabase.co';
+const DEFAULT_SUPABASE_KEY = 'sb_publishable_M6hWtVUT1bwaAkV2Ma6VKw_OzToQzvz';
 
 const supabaseUrl = process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const publicKey = process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
+// The CRM tables only allow signed-in advisors (see supabase/schema.sql), so the server
+// either uses a service-role key or signs in as an advisor account.
+const advisorEmail = process.env.SUPABASE_EMAIL || '';
+const advisorPassword = process.env.SUPABASE_PASSWORD || '';
 
 let client = null;
+let signInPromise = null;
 
-function getSupabaseClient() {
-  if (!supabaseUrl || !supabaseKey) return null;
+function isConfigured() {
+  return Boolean(supabaseUrl && (serviceKey || (publicKey && advisorEmail && advisorPassword)));
+}
+
+async function getSupabaseClient() {
+  if (!isConfigured()) return null;
   if (!client) {
-    client = createClient(supabaseUrl, supabaseKey, {
-      auth: { persistSession: false }
+    client = createClient(supabaseUrl, serviceKey || publicKey, {
+      auth: { persistSession: false, autoRefreshToken: true }
     });
+  }
+  if (!serviceKey) {
+    const { data } = await client.auth.getSession();
+    if (!data.session) {
+      if (!signInPromise) {
+        signInPromise = client.auth
+          .signInWithPassword({ email: advisorEmail, password: advisorPassword })
+          .then(({ error }) => {
+            if (error) throw new Error(`Supabase advisor sign-in failed: ${error.message}`);
+          })
+          .finally(() => { signInPromise = null; });
+      }
+      await signInPromise;
+    }
   }
   return client;
 }
 
-function isConfigured() {
-  return Boolean(supabaseUrl && supabaseKey);
-}
-
 async function testConnection() {
-  const sb = getSupabaseClient();
-  if (!sb) {
-    return { success: false, message: 'Supabase is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY.' };
+  if (!isConfigured()) {
+    return {
+      success: false,
+      message: 'Supabase sign-in is not configured. Set SUPABASE_EMAIL and SUPABASE_PASSWORD (or SUPABASE_SERVICE_ROLE_KEY) in web/.env.'
+    };
+  }
+  let sb;
+  try {
+    sb = await getSupabaseClient();
+  } catch (err) {
+    return { success: false, message: err.message };
   }
   try {
     const { error } = await sb.from('customers').select('id', { count: 'exact', head: true });
@@ -45,7 +74,7 @@ async function testConnection() {
  * records and document metadata are synchronized with Supabase.
  */
 async function syncToSupabase(dbHelper) {
-  const sb = getSupabaseClient();
+  const sb = await getSupabaseClient();
   if (!sb) throw new Error('Supabase is not configured.');
 
   // 1. Customers
@@ -131,7 +160,7 @@ async function syncToSupabase(dbHelper) {
  * Pulls records from Supabase and merges into SQLite.
  */
 async function syncFromSupabase(dbHelper) {
-  const sb = getSupabaseClient();
+  const sb = await getSupabaseClient();
   if (!sb) throw new Error('Supabase is not configured.');
 
   const { data: remoteCustomers, error: cErr } = await sb.from('customers').select('*');

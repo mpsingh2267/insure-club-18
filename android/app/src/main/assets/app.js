@@ -40,9 +40,12 @@
   const customerBy = id => state.customers.find(x => x.id === id);
   const policyBy = id => state.policies.find(x => x.id === id);
 
+  // Live InsureClub cloud project. Data access needs an advisor sign-in (see supabase-auth.js).
+  const Auth = window.InsureClubAuth;
+  const LEGACY_PLACEHOLDER_URL = 'https://insureclub-sync.supabase.co';
   const DEFAULT_SUPABASE = {
-    url: 'https://insureclub-sync.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imluc3VyZWNsdWItc3luYyIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzA5NzcwMDAwLCJleHAiOjIwMjUzMzAwMDB9.insureclub_default_anon_key_active',
+    url: Auth ? Auth.PROJECT_URL : 'https://pzezoumopzwczakpsdlk.supabase.co',
+    anonKey: Auth ? Auth.PUBLISHABLE_KEY : 'sb_publishable_M6hWtVUT1bwaAkV2Ma6VKw_OzToQzvz',
     autoSync: true,
     lastSyncAt: null,
     status: 'Ready (Auto-sync active)'
@@ -93,7 +96,7 @@
         stored.outbox = Array.isArray(stored.outbox) ? stored.outbox : [];
         stored.syncState = stored.outbox.length > 0 ? 'pending' : 'synced';
         stored.supabase = stored.supabase || {};
-        if (!stored.supabase.url) {
+        if (!stored.supabase.url || stored.supabase.url.replace(/\/+$/, '') === LEGACY_PLACEHOLDER_URL) {
           stored.supabase.url = DEFAULT_SUPABASE.url;
           stored.supabase.anonKey = DEFAULT_SUPABASE.anonKey;
           stored.supabase.status = 'Ready (Auto-sync active)';
@@ -631,6 +634,14 @@
       if (manual) toast('Device is offline');
       return;
     }
+    // The live cloud project only accepts signed-in advisors. Changes wait safely in the
+    // local outbox until then.
+    if (Auth && url.replace(/\/+$/, '') === Auth.PROJECT_URL && !Auth.isSignedIn()) {
+      state.supabase.status = 'Sign in required';
+      updateSyncUI();
+      if (manual) Auth.prompt();
+      return;
+    }
 
     isSyncing = true;
     state.syncState = 'syncing';
@@ -717,14 +728,19 @@
     const key = state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
     if (!state.supabase?.autoSync || !url || !key) return;
     if (typeof WebSocket === 'undefined') return;
+    const isLive = Boolean(Auth) && url.replace(/\/+$/, '') === Auth.PROJECT_URL;
+    if (isLive && !Auth.isSignedIn()) return;
     if (realtimeWs && (realtimeWs.readyState === WebSocket.OPEN || realtimeWs.readyState === WebSocket.CONNECTING)) return;
 
     try {
       const wsUrl = url.replace(/^http/, 'ws').replace(/\/+$/, '') + `/realtime/v1/websocket?apikey=${encodeURIComponent(key)}&vsn=1.0.0`;
       realtimeWs = new WebSocket(wsUrl);
 
-      realtimeWs.onopen = () => {
+      realtimeWs.onopen = async () => {
         clearInterval(realtimeHeartbeat);
+        // Realtime enforces the same row-level security, so join with the advisor's token.
+        const accessToken = isLive ? await Auth.accessToken().catch(() => null) : null;
+        if (!realtimeWs || realtimeWs.readyState !== WebSocket.OPEN) return;
         realtimeHeartbeat = setInterval(() => {
           if (realtimeWs && realtimeWs.readyState === WebSocket.OPEN) {
             realtimeWs.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(wsMsgRef++) }));
@@ -735,6 +751,7 @@
           topic: 'realtime:public',
           event: 'phx_join',
           payload: {
+            ...(accessToken ? { access_token: accessToken } : {}),
             config: {
               broadcast: { self: false },
               postgres_changes: [
@@ -943,6 +960,20 @@
     window.addEventListener('focus', onResume);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') onResume();
+    });
+
+    // Sync right after the advisor signs in; drop the live channel after sign-out.
+    window.addEventListener('insureclub-auth-changed', e => {
+      if (realtimeWs) {
+        try { realtimeWs.close(); } catch {}
+        realtimeWs = null;
+      }
+      renderSettings();
+      if (e.detail?.signedIn) {
+        toast(`Signed in as ${e.detail.email || 'advisor'}`);
+        performSync(true);
+        initSupabaseRealtime();
+      }
     });
 
     // Initial sync and Realtime connection shortly after boot
@@ -2142,6 +2173,10 @@
     const url = ($('#supabaseUrl').value || '').trim() || state.supabase?.url || DEFAULT_SUPABASE.url;
     const key = ($('#supabaseAnonKey').value || '').trim() || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
     if (!url || !key) return toast('Enter Supabase URL and Anon Key');
+    if (Auth && url.replace(/\/+$/, '') === Auth.PROJECT_URL && !Auth.isSignedIn()) {
+      Auth.prompt();
+      return;
+    }
     toast('Testing Supabase connection…');
     try {
       await SupabaseSync.testConnection(url, key);
@@ -2158,6 +2193,15 @@
 
   $('#syncNowBtn')?.addEventListener('click', () => performSync(true));
   $('#topbarSyncBtn')?.addEventListener('click', () => performSync(true));
+
+  // Advisor sign-in card above the sync controls in Settings.
+  if (Auth && $('#syncStatusBanner')) {
+    const holder = document.createElement('div');
+    holder.style.margin = '0 0 12px';
+    const banner = $('#syncStatusBanner');
+    banner.parentElement.insertBefore(holder, banner);
+    Auth.mount(holder);
+  }
 
   // Backup & Restore
   $('#exportBackup').addEventListener('click', () => window.InsureClubNative?.exportData?.(JSON.stringify(state)));

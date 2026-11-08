@@ -162,8 +162,45 @@ CREATE INDEX IF NOT EXISTS idx_documents_customer_id ON public.documents(custome
 CREATE INDEX IF NOT EXISTS idx_documents_policy_id ON public.documents(policy_id);
 CREATE INDEX IF NOT EXISTS idx_documents_type ON public.documents(document_type);
 
--- Row Level Security (RLS) Policies
--- Allow public anon API access for InsureClub CRM client with anon key
+-- Access control
+-- CRM data holds customer personal and policy details, so the public (anon) key
+-- alone must never read or write it. Only signed-in Supabase Auth users whose
+-- confirmed email is listed in public.crm_members get access.
+--
+-- Add an advisor:  INSERT INTO public.crm_members (email) VALUES ('advisor@example.com');
+-- (Create their login first: Supabase dashboard -> Authentication -> Users -> Add user.)
+
+CREATE TABLE IF NOT EXISTS public.crm_members (
+    email TEXT PRIMARY KEY,
+    role TEXT NOT NULL DEFAULT 'advisor',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+ALTER TABLE public.crm_members ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.crm_members FROM anon, authenticated;
+
+-- Lives in a private schema so it is not callable through the REST API.
+CREATE SCHEMA IF NOT EXISTS private;
+REVOKE ALL ON SCHEMA private FROM PUBLIC, anon;
+GRANT USAGE ON SCHEMA private TO authenticated;
+
+CREATE OR REPLACE FUNCTION private.is_crm_member()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM auth.users u
+        JOIN public.crm_members m ON lower(m.email) = lower(u.email)
+        WHERE u.id = auth.uid()
+          AND u.email_confirmed_at IS NOT NULL
+    );
+$$;
+REVOKE ALL ON FUNCTION private.is_crm_member() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION private.is_crm_member() TO authenticated;
+
 ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.policies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.family_members ENABLE ROW LEVEL SECURITY;
@@ -174,33 +211,38 @@ ALTER TABLE public.porting_reminders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.message_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activities ENABLE ROW LEVEL SECURITY;
 
--- Allow read/write for authenticated users or anon API with project key
 DO $$
+DECLARE
+    t TEXT;
 BEGIN
-    DROP POLICY IF EXISTS "Anon public access to customers" ON public.customers;
-    CREATE POLICY "Anon public access to customers" ON public.customers FOR ALL USING (true) WITH CHECK (true);
+    FOREACH t IN ARRAY ARRAY['customers', 'policies', 'family_members', 'appointments', 'reminders',
+                             'documents', 'porting_reminders', 'message_templates', 'activities']
+    LOOP
+        -- Remove the old wide-open policy from earlier versions of this schema.
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'Anon public access to ' || t, t);
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'CRM members full access', t);
+        EXECUTE format(
+            'CREATE POLICY %I ON public.%I FOR ALL TO authenticated USING ((SELECT private.is_crm_member())) WITH CHECK ((SELECT private.is_crm_member()))',
+            'CRM members full access', t);
+        EXECUTE format('REVOKE ALL ON public.%I FROM anon', t);
+        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO authenticated', t);
+    END LOOP;
+END $$;
 
-    DROP POLICY IF EXISTS "Anon public access to policies" ON public.policies;
-    CREATE POLICY "Anon public access to policies" ON public.policies FOR ALL USING (true) WITH CHECK (true);
-
-    DROP POLICY IF EXISTS "Anon public access to family_members" ON public.family_members;
-    CREATE POLICY "Anon public access to family_members" ON public.family_members FOR ALL USING (true) WITH CHECK (true);
-
-    DROP POLICY IF EXISTS "Anon public access to appointments" ON public.appointments;
-    CREATE POLICY "Anon public access to appointments" ON public.appointments FOR ALL USING (true) WITH CHECK (true);
-
-    DROP POLICY IF EXISTS "Anon public access to reminders" ON public.reminders;
-    CREATE POLICY "Anon public access to reminders" ON public.reminders FOR ALL USING (true) WITH CHECK (true);
-
-    DROP POLICY IF EXISTS "Anon public access to documents" ON public.documents;
-    CREATE POLICY "Anon public access to documents" ON public.documents FOR ALL USING (true) WITH CHECK (true);
-
-    DROP POLICY IF EXISTS "Anon public access to porting_reminders" ON public.porting_reminders;
-    CREATE POLICY "Anon public access to porting_reminders" ON public.porting_reminders FOR ALL USING (true) WITH CHECK (true);
-
-    DROP POLICY IF EXISTS "Anon public access to message_templates" ON public.message_templates;
-    CREATE POLICY "Anon public access to message_templates" ON public.message_templates FOR ALL USING (true) WITH CHECK (true);
-
-    DROP POLICY IF EXISTS "Anon public access to activities" ON public.activities;
-    CREATE POLICY "Anon public access to activities" ON public.activities FOR ALL USING (true) WITH CHECK (true);
+-- Live updates for the web portal (respects the policies above).
+DO $$
+DECLARE
+    t TEXT;
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+        FOREACH t IN ARRAY ARRAY['customers', 'policies', 'family_members', 'appointments', 'documents']
+        LOOP
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_publication_tables
+                WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+            ) THEN
+                EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+            END IF;
+        END LOOP;
+    END IF;
 END $$;
