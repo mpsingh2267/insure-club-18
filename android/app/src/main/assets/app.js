@@ -40,6 +40,20 @@
   const customerBy = id => state.customers.find(x => x.id === id);
   const policyBy = id => state.policies.find(x => x.id === id);
 
+  const SUPABASE_SCHEMA_SQL = "-- InsureClub CRM - Supabase Database Schema\n-- Provides cloud database storage and multi-device sync for customers, policies,\n-- family members, appointments, reminders, document metadata, and templates.\n-- NOTE: In accordance with local-first privacy requirements, physical attached\n-- files (PDFs, images, scans) are stored locally on device storage. Only metadata\n-- is synced in the documents table.\n\n-- 1. Customers Table\nCREATE TABLE IF NOT EXISTS public.customers (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    phone TEXT,\n    email TEXT,\n    city TEXT,\n    address TEXT,\n    date_of_birth DATE,\n    anniversary_date DATE,\n    notes TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 2. Policies Table\n-- Stores all policies. When a policy is renewed, older policies remain intact\n-- with status 'Renewed' or 'Historical' and are NEVER deleted.\nCREATE TABLE IF NOT EXISTS public.policies (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    company_name TEXT NOT NULL,\n    product_name TEXT NOT NULL,\n    category_name TEXT,\n    policy_number TEXT NOT NULL,\n    start_date DATE,\n    renewal_due_date DATE NOT NULL,\n    premium_amount NUMERIC(12, 2) DEFAULT 0,\n    sum_insured NUMERIC(14, 2) DEFAULT 0,\n    status TEXT NOT NULL DEFAULT 'Active', -- 'Active', 'Renewed', 'Historical', 'Expired', 'Cancelled'\n    previous_policy_id TEXT REFERENCES public.policies(id) ON DELETE SET NULL,\n    notes TEXT,\n    has_document BOOLEAN DEFAULT false,\n    document_name TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 3. Family Members Table\nCREATE TABLE IF NOT EXISTS public.family_members (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,\n    full_name TEXT NOT NULL,\n    relationship TEXT NOT NULL,\n    date_of_birth DATE,\n    mobile TEXT,\n    notes TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 4. Appointments Table\nCREATE TABLE IF NOT EXISTS public.appointments (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    date DATE NOT NULL,\n    time TEXT,\n    purpose TEXT NOT NULL,\n    product_name TEXT,\n    company_name TEXT,\n    reminder_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'Scheduled',\n    notes TEXT,\n    follow_up_at TIMESTAMPTZ,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 5. Reminders Table\nCREATE TABLE IF NOT EXISTS public.reminders (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    policy_id TEXT REFERENCES public.policies(id) ON DELETE CASCADE,\n    family_member_id TEXT REFERENCES public.family_members(id) ON DELETE CASCADE,\n    type TEXT NOT NULL,\n    activity TEXT NOT NULL,\n    due_at TIMESTAMPTZ NOT NULL,\n    status TEXT NOT NULL DEFAULT 'Pending',\n    notes TEXT,\n    auto BOOLEAN DEFAULT false,\n    completed_at TIMESTAMPTZ,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 6. Document Metadata Table (Local-First: Binaries stay on local device storage)\n-- Tracks PAN cards, birth certificates, policy documents, Aadhaar cards, etc.\nCREATE TABLE IF NOT EXISTS public.documents (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    policy_id TEXT REFERENCES public.policies(id) ON DELETE SET NULL,\n    family_member_id TEXT REFERENCES public.family_members(id) ON DELETE SET NULL,\n    document_type TEXT NOT NULL, -- 'PAN Card', 'Birth Certificate', 'Aadhaar Card', 'Policy Document', etc.\n    title TEXT NOT NULL,\n    file_name TEXT NOT NULL,\n    file_size BIGINT DEFAULT 0,\n    mime_type TEXT DEFAULT 'application/pdf',\n    local_storage_path TEXT,\n    notes TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 7. Porting Reminders Table\nCREATE TABLE IF NOT EXISTS public.porting_reminders (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT REFERENCES public.customers(id) ON DELETE CASCADE,\n    customer_name TEXT,\n    policy_id TEXT REFERENCES public.policies(id) ON DELETE CASCADE,\n    existing_company TEXT,\n    existing_policy TEXT,\n    renewal_date DATE,\n    target_company TEXT,\n    target_product TEXT,\n    reminder_date DATE,\n    status TEXT NOT NULL DEFAULT 'Pending',\n    notes TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 8. Message Templates Table\nCREATE TABLE IF NOT EXISTS public.message_templates (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    type TEXT NOT NULL,\n    body TEXT NOT NULL,\n    is_default BOOLEAN DEFAULT false,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- 9. Activities / Audit Logs Table\nCREATE TABLE IF NOT EXISTS public.activities (\n    id TEXT PRIMARY KEY,\n    customer_id TEXT REFERENCES public.customers(id) ON DELETE CASCADE,\n    type TEXT NOT NULL,\n    text TEXT NOT NULL,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())\n);\n\n-- Indexes for lightning fast queries\nCREATE INDEX IF NOT EXISTS idx_customers_phone ON public.customers(phone);\nCREATE INDEX IF NOT EXISTS idx_policies_customer_id ON public.policies(customer_id);\nCREATE INDEX IF NOT EXISTS idx_policies_renewal_due_date ON public.policies(renewal_due_date);\nCREATE INDEX IF NOT EXISTS idx_policies_status ON public.policies(status);\nCREATE INDEX IF NOT EXISTS idx_family_customer_id ON public.family_members(customer_id);\nCREATE INDEX IF NOT EXISTS idx_reminders_due_at ON public.reminders(due_at);\nCREATE INDEX IF NOT EXISTS idx_reminders_status ON public.reminders(status);\nCREATE INDEX IF NOT EXISTS idx_documents_customer_id ON public.documents(customer_id);\nCREATE INDEX IF NOT EXISTS idx_documents_policy_id ON public.documents(policy_id);\nCREATE INDEX IF NOT EXISTS idx_documents_type ON public.documents(document_type);\n\n-- Row Level Security (RLS) Policies\n-- Allow public anon API access for InsureClub CRM client with anon key\nALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.policies ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.family_members ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.reminders ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.porting_reminders ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.message_templates ENABLE ROW LEVEL SECURITY;\nALTER TABLE public.activities ENABLE ROW LEVEL SECURITY;\n\n-- Allow read/write for authenticated users or anon API with project key\nDO $\nBEGIN\n    DROP POLICY IF EXISTS \"Anon public access to customers\" ON public.customers;\n    CREATE POLICY \"Anon public access to customers\" ON public.customers FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to policies\" ON public.policies;\n    CREATE POLICY \"Anon public access to policies\" ON public.policies FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to family_members\" ON public.family_members;\n    CREATE POLICY \"Anon public access to family_members\" ON public.family_members FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to appointments\" ON public.appointments;\n    CREATE POLICY \"Anon public access to appointments\" ON public.appointments FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to reminders\" ON public.reminders;\n    CREATE POLICY \"Anon public access to reminders\" ON public.reminders FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to documents\" ON public.documents;\n    CREATE POLICY \"Anon public access to documents\" ON public.documents FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to porting_reminders\" ON public.porting_reminders;\n    CREATE POLICY \"Anon public access to porting_reminders\" ON public.porting_reminders FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to message_templates\" ON public.message_templates;\n    CREATE POLICY \"Anon public access to message_templates\" ON public.message_templates FOR ALL USING (true) WITH CHECK (true);\n\n    DROP POLICY IF EXISTS \"Anon public access to activities\" ON public.activities;\n    CREATE POLICY \"Anon public access to activities\" ON public.activities FOR ALL USING (true) WITH CHECK (true);\nEND $;\n";
+  function isPlaceholderUrl(url) {
+    if (!url) return true;
+    const clean = String(url).toLowerCase().trim();
+    return clean.includes('insureclub-sync.supabase.co') ||
+           clean.includes('example.supabase.co') ||
+           clean.includes('placeholder') ||
+           clean.includes('your-project') ||
+           clean.includes('xyz.supabase.co') ||
+           clean === 'https://' ||
+           clean === 'http://';
+  }
+
+
   const DEFAULT_SUPABASE = {
     url: 'https://insureclub-sync.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imluc3VyZWNsdWItc3luYyIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzA5NzcwMDAwLCJleHAiOjIwMjUzMzAwMDB9.insureclub_default_anon_key_active',
@@ -325,6 +339,9 @@
     async testConnection(url, key) {
       if (!url || !key) throw new Error('Enter both Supabase URL and Anon Key');
       const cleanUrl = url.replace(/\/+$/, '');
+      if (isPlaceholderUrl(cleanUrl)) {
+        throw new Error('The default domain insureclub-sync.supabase.co is a placeholder for local offline storage.\n\nTo connect live cloud sync with the website, enter your active Supabase Project URL (e.g. https://your-id.supabase.co) and public anon key.');
+      }
       const res = await fetch(`${cleanUrl}/rest/v1/customers?select=count&limit=1`, {
         method: 'GET',
         headers: {
@@ -343,8 +360,8 @@
     async pushAll(url, key, silent = false) {
       const targetUrl = url || state.supabase?.url || DEFAULT_SUPABASE.url;
       const targetKey = key || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
-      if (!targetUrl || !targetKey) {
-        if (!silent) throw new Error('Enter Supabase URL and Anon Key in Settings');
+      if (!targetUrl || !targetKey || isPlaceholderUrl(targetUrl)) {
+        if (!silent && !isPlaceholderUrl(targetUrl)) throw new Error('Enter Supabase URL and Anon Key in Settings');
         return false;
       }
       try {
@@ -465,8 +482,8 @@
     async pullAll(url, key, silent = false) {
       const targetUrl = url || state.supabase?.url || DEFAULT_SUPABASE.url;
       const targetKey = key || state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
-      if (!targetUrl || !targetKey) {
-        if (!silent) throw new Error('Enter Supabase URL and Anon Key in Settings');
+      if (!targetUrl || !targetKey || isPlaceholderUrl(targetUrl)) {
+        if (!silent && !isPlaceholderUrl(targetUrl)) throw new Error('Enter Supabase URL and Anon Key in Settings');
         return false;
       }
       try {
@@ -715,7 +732,7 @@
   function initSupabaseRealtime() {
     const url = state.supabase?.url || DEFAULT_SUPABASE.url;
     const key = state.supabase?.anonKey || DEFAULT_SUPABASE.anonKey;
-    if (!state.supabase?.autoSync || !url || !key) return;
+    if (!state.supabase?.autoSync || !url || !key || isPlaceholderUrl(url)) return;
     if (typeof WebSocket === 'undefined') return;
     if (realtimeWs && (realtimeWs.readyState === WebSocket.OPEN || realtimeWs.readyState === WebSocket.CONNECTING)) return;
 
@@ -2153,6 +2170,25 @@
       state.supabase.status = 'Error';
       renderSettings();
       alert(`Supabase connection notice:\n${err.message}`);
+    }
+  });
+
+  
+  $('#copySchemaBtn')?.addEventListener('click', async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = SUPABASE_SCHEMA_SQL;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      toast('SQL Schema copied to clipboard ✓');
+    } catch {
+      toast('Could not copy schema automatically');
     }
   });
 
